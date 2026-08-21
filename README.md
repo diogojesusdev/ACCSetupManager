@@ -8,6 +8,7 @@ Windows-first desktop app for browsing, editing, and organizing Assetto Corsa Co
 - auto-detection of the default ACC setups root
 - manual root override stored in a local SQLite database
 - filesystem scan for cars and tracks with on-demand local setup loading
+- startup backfill of the full ACC track folder set for every existing car folder
 - three-column explorer layout with dedicated local and remote setup workspaces
 - structured setup editor by default with raw JSON fallback, explicit save, and syntax-only validation
 - local create, rename, delete, and import flows

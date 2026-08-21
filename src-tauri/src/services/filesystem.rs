@@ -14,11 +14,40 @@ use crate::services::settings;
 use crate::state::AppState;
 
 const EMPTY_SETUP_CONTENT: &str = "{}\n";
+const KNOWN_ACC_TRACK_FOLDER_NAMES: &[&str] = &[
+    "monza",
+    "zolder",
+    "brands_hatch",
+    "silverstone",
+    "paul_ricard",
+    "misano",
+    "spa",
+    "nurburgring",
+    "barcelona",
+    "hungaroring",
+    "zandvoort",
+    "kyalami",
+    "mount_panorama",
+    "suzuka",
+    "laguna_seca",
+    "imola",
+    "oulton_park",
+    "donington",
+    "snetterton",
+    "cota",
+    "indianapolis",
+    "watkins_glen",
+    "valencia",
+    "nurburgring_24h",
+];
 
 pub fn load_bootstrap(state: &AppState) -> AppResult<AppBootstrap> {
     let settings = settings::load_settings(&state.db_path)?;
     let library = match settings.root_status {
-        RootStatus::Ready => scan_local_library(&settings)?,
+        RootStatus::Ready => {
+            ensure_known_track_folders(&settings)?;
+            scan_local_library(&settings)?
+        }
         RootStatus::Missing | RootStatus::Invalid => LocalLibrary::default(),
     };
 
@@ -315,6 +344,37 @@ fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
     Ok(LocalLibrary { cars, tracks })
 }
 
+fn ensure_known_track_folders(settings: &AppSettings) -> AppResult<()> {
+    let root = settings::resolve_effective_root(settings)
+        .ok_or_else(|| AppError::from("No valid setup root is configured."))?;
+
+    for car_entry in sorted_directory_entries(&root, true)? {
+        let car_path = car_entry.path();
+
+        for track_folder_name in KNOWN_ACC_TRACK_FOLDER_NAMES {
+            let track_path = car_path.join(track_folder_name);
+            if track_path.exists() {
+                if !track_path.is_dir() {
+                    return Err(AppError::from(format!(
+                        "Cannot create the '{}' track folder for '{}' because a file already exists at that path.",
+                        track_folder_name,
+                        car_path
+                            .file_name()
+                            .and_then(|value| value.to_str())
+                            .unwrap_or("the selected car")
+                    )));
+                }
+
+                continue;
+            }
+
+            fs::create_dir(&track_path)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn scan_track_setups(track_path: &Path) -> AppResult<Vec<LocalSetup>> {
     let track_id = path_to_string(track_path);
     sorted_directory_entries(track_path, false)?
@@ -565,16 +625,30 @@ fn path_to_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{sort_os_strings_case_insensitive, unique_copy_target_path};
+    use super::{
+        ensure_known_track_folders, sort_os_strings_case_insensitive, unique_copy_target_path,
+        KNOWN_ACC_TRACK_FOLDER_NAMES,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::{collections::BTreeSet, ffi::OsString};
     use uuid::Uuid;
 
+    use crate::models::{AppSettings, RootStatus};
+
     fn create_temp_dir() -> PathBuf {
         let path = std::env::temp_dir().join(format!("acc-setup-manager-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("create temp dir");
         path
+    }
+
+    fn settings_with_root(root: &PathBuf) -> AppSettings {
+        AppSettings {
+            detected_root: Some(root.to_string_lossy().into_owned()),
+            manual_root: None,
+            effective_root: Some(root.to_string_lossy().into_owned()),
+            root_status: RootStatus::Ready,
+        }
     }
 
     #[test]
@@ -583,6 +657,47 @@ mod tests {
         let target_path = unique_copy_target_path(&temp_dir, "race.json");
 
         assert_eq!(target_path, temp_dir.join("race.json"));
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn creates_known_track_folders_for_existing_cars() {
+        let temp_dir = create_temp_dir();
+        let first_car_path = temp_dir.join("bmw_m4_gt3");
+        let second_car_path = temp_dir.join("mclaren_720s_gt3_evo");
+        fs::create_dir_all(first_car_path.join("monza")).expect("create existing track");
+        fs::create_dir_all(&second_car_path).expect("create second car");
+
+        ensure_known_track_folders(&settings_with_root(&temp_dir)).expect("create track folders");
+
+        for car_path in [&first_car_path, &second_car_path] {
+            for track_folder_name in KNOWN_ACC_TRACK_FOLDER_NAMES {
+                assert!(
+                    car_path.join(track_folder_name).is_dir(),
+                    "missing track folder '{}' for '{}'",
+                    track_folder_name,
+                    car_path.display()
+                );
+            }
+        }
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn errors_when_track_path_is_taken_by_a_file() {
+        let temp_dir = create_temp_dir();
+        let car_path = temp_dir.join("bmw_m4_gt3");
+        fs::create_dir_all(&car_path).expect("create car folder");
+        fs::write(car_path.join("spa"), "not a directory").expect("create conflicting file");
+
+        let error =
+            ensure_known_track_folders(&settings_with_root(&temp_dir)).expect_err("expect error");
+
+        assert!(error
+            .to_string()
+            .contains("Cannot create the 'spa' track folder"));
 
         fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
