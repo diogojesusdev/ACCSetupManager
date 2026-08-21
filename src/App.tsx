@@ -361,7 +361,7 @@ function App() {
       const document = await readSetupDocument(setupPath)
       openDocumentPane(document)
     } catch (error) {
-      showError('Unable to open setup', error)
+      showError("Couldn't open this setup", error)
     }
   }
 
@@ -369,20 +369,20 @@ function App() {
     mutationFn: ({ trackPath, fileName }: { trackPath: string; fileName: string }) =>
       createLocalSetup(trackPath, fileName),
     onSuccess: async (result) => {
-      applyMutationResult(result, 'Setup created.')
+      applyMutationResult(result, 'Your new setup is ready.')
       setRenameModal(null)
       if (result.selectedSetupPath) {
         await openSetupInEditor(result.selectedSetupPath)
       }
     },
-    onError: (error) => showError('Unable to create setup', error),
+    onError: (error) => showError("Couldn't create this setup", error),
   })
 
   const renameMutation = useMutation({
     mutationFn: ({ path, newFileName }: { path: string; newFileName: string }) =>
       renameLocalSetup(path, newFileName),
     onSuccess: (result, variables) => {
-      applyMutationResult(result, 'Setup renamed.')
+      applyMutationResult(result, 'Setup name updated.')
       setRenameModal(null)
 
       if (openDocument && openDocument.id === variables.path) {
@@ -393,31 +393,31 @@ function App() {
         )
       }
     },
-    onError: (error) => showError('Unable to rename setup', error),
+    onError: (error) => showError("Couldn't rename this setup", error),
   })
 
   const saveMutation = useMutation({
     mutationFn: ({ path, content }: { path: string; content: string }) =>
       saveLocalSetup(path, content),
     onSuccess: (result) => {
-      applyMutationResult(result, 'Setup saved.')
+      applyMutationResult(result, 'Changes saved.')
       if (openDocument) {
         markOpenDocumentSaved(openDocument.content)
       }
     },
-    onError: (error) => showError('Unable to save setup', error),
+    onError: (error) => showError("Couldn't save your changes", error),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (path: string) => deleteLocalSetup(path),
     onSuccess: (result, path) => {
-      applyMutationResult(result, 'Setup deleted.')
+      applyMutationResult(result, 'Setup removed.')
       if (openDocument?.id === path) {
         closeOpenDocument()
       }
       setDeleteCandidate(null)
     },
-    onError: (error) => showError('Unable to delete setup', error),
+    onError: (error) => showError("Couldn't remove this setup", error),
   })
 
   const importMutation = useMutation({
@@ -433,11 +433,11 @@ function App() {
       overwrite: boolean
     }) => importLocalSetup(trackPath, sourcePath, targetFileName, overwrite),
     onSuccess: (result) => {
-      applyMutationResult(result, 'Setup imported.')
+      applyMutationResult(result, 'Setup added to your library.')
       setPendingImportName('')
       setImportOverwrite(false)
     },
-    onError: (error) => showError('Unable to import setup', error),
+    onError: (error) => showError("Couldn't add this setup", error),
   })
 
   const copyMutation = useMutation({
@@ -453,19 +453,19 @@ function App() {
       applyMutationResult(result, `Setup copied to ${count} track${count === 1 ? '' : 's'}.`)
       setCopySetupModal(null)
     },
-    onError: (error) => showError('Unable to copy setup', error),
+    onError: (error) => showError("Couldn't copy this setup", error),
   })
 
   const undoMutation = useMutation({
     mutationFn: () => undoLastOperation(),
     onSuccess: (result) => applyMutationResult(result),
-    onError: (error) => showError('Unable to undo', error),
+    onError: (error) => showError("Couldn't undo that change", error),
   })
 
   const redoMutation = useMutation({
     mutationFn: () => redoLastOperation(),
     onSuccess: (result) => applyMutationResult(result),
-    onError: (error) => showError('Unable to redo', error),
+    onError: (error) => showError("Couldn't redo that change", error),
   })
 
   const refreshRemoteMutation = useMutation({
@@ -473,16 +473,16 @@ function App() {
       loadRemoteSourceResults(activeRemoteSource, selectedCar, selectedTrack, true),
     onSuccess: (result) => {
       queryClient.setQueryData(remoteQueryKey, result)
-      showSuccess('Remote setups refreshed.')
+      showSuccess('Community setups updated.')
     },
-    onError: (error) => showError('Unable to refresh remote setups', error),
+    onError: (error) => showError("Couldn't refresh community setups", error),
   })
 
   const remotePreviewMutation = useMutation({
     mutationFn: ({ sourceId, remoteSetupId }: { sourceId: string; remoteSetupId: string }) =>
       readRemoteSetupDocument(sourceId, remoteSetupId),
     onSuccess: (document) => openDocumentPane(document),
-    onError: (error) => showError('Unable to load remote preview', error),
+    onError: (error) => showError("Couldn't open this preview", error),
   })
 
   const remoteDownloadMutation = useMutation({
@@ -505,10 +505,10 @@ function App() {
       }),
     onSuccess: (result, variables) => {
       const count = variables.targetTrackPaths.length
-      applyMutationResult(result, `Remote setup installed to ${count} track${count === 1 ? '' : 's'}.`)
+      applyMutationResult(result, `Setup added to ${count} track${count === 1 ? '' : 's'}.`)
       setRemoteInstallModal(null)
     },
-    onError: (error) => showError('Unable to download remote setup', error),
+    onError: (error) => showError("Couldn't add this setup", error),
   })
 
   const rootMutation = useMutation({
@@ -517,11 +517,11 @@ function App() {
       queryClient.setQueryData<AppBootstrap>(bootstrapQueryKey, result)
       void queryClient.removeQueries({ queryKey: localSetupsQueryKey })
       void queryClient.removeQueries({ queryKey: ['remote-source'] })
-      showSuccess('Setup root updated.')
+      showSuccess('Setup folder updated.')
       setSettingsOpened(false)
       closeOpenDocument()
     },
-    onError: (error) => showError('Unable to update setup root', error),
+    onError: (error) => showError("Couldn't update your setup folder", error),
   })
 
   const handlePickRoot = async () => {
@@ -533,13 +533,13 @@ function App() {
 
       await rootMutation.mutateAsync(path)
     } catch (error) {
-      showError('Unable to choose a folder', error)
+      showError("Couldn't choose this folder", error)
     }
   }
 
   const handleImportClick = async () => {
     if (!selectedTrack) {
-      showError('Import unavailable', 'Select a track folder first.')
+      showError('Choose a track first', 'Then you can add a setup to it.')
       return
     }
 
@@ -557,7 +557,7 @@ function App() {
         overwrite: importOverwrite,
       })
     } catch (error) {
-      showError('Unable to import setup', error)
+      showError("Couldn't add this setup", error)
     }
   }
 
@@ -571,7 +571,7 @@ function App() {
     const sourcePath = file?.path
 
     if (!sourcePath) {
-      showError('Import unavailable', 'The dropped file path was not available to the app.')
+      showError("Couldn't add this setup", 'Try choosing the file instead of dragging it here.')
       return
     }
 
@@ -583,7 +583,7 @@ function App() {
         overwrite: false,
       })
     } catch (error) {
-      showError('Unable to import setup', error)
+      showError("Couldn't add this setup", error)
     }
   }
 
@@ -659,7 +659,7 @@ function App() {
               No cars found
             </Text>
             <Text size="sm" c="dimmed" ta="center" maw={300}>
-              Pick the ACC setups folder first, then every car will appear here.
+              Choose your ACC setups folder to see your cars here.
             </Text>
           </Stack>
         </Group>
@@ -709,7 +709,7 @@ function App() {
               Select a car first
             </Text>
             <Text size="sm" c="dimmed" ta="center" maw={280}>
-              The tracks for that car will appear in this column.
+              Its tracks will appear here.
             </Text>
           </Stack>
         </Group>
@@ -724,7 +724,7 @@ function App() {
               No tracks found
             </Text>
             <Text size="sm" c="dimmed" ta="center" maw={280}>
-              {selectedCar.displayName} does not have any track folders yet.
+              No tracks have been found for {selectedCar.displayName} yet.
             </Text>
           </Stack>
         </Group>
@@ -819,7 +819,7 @@ function App() {
                     <Text size="xs" c="dimmed">
                       {item.updatedAt
                         ? `Updated ${formatDate(item.updatedAt)}`
-                        : 'Preview and download are available for this setup.'}
+                        : 'You can preview or add this setup to your library.'}
                     </Text>
                   </Stack>
                   <Group gap="xs" wrap="wrap" justify="flex-end" className="setup-row__actions">
@@ -832,7 +832,7 @@ function App() {
                         onOpenSourcePage(item)
                       }}
                     >
-                      Source
+                      View source
                     </Button>
                     <Button
                       variant="light"
@@ -870,12 +870,12 @@ function App() {
         <Group justify="center" align="center" h="100%">
           <Stack gap={6} align="center">
             <Text size="sm" fw={600}>
-              {selectedTrack ? 'No local setups yet' : 'Select a track to begin'}
+              {selectedTrack ? 'No saved setups yet' : 'Choose a track to begin'}
             </Text>
             <Text size="sm" c="dimmed" ta="center" maw={280}>
               {selectedTrack
-                ? 'Create a fresh JSON setup, import one from disk, or browse the remote library for ready-made baselines.'
-                : 'Choose a track from the explorer first, then this pane will show every local setup for that folder.'}
+                ? 'Create a setup, add one from your computer, or browse community setups.'
+                : 'Choose a car and track to see the setups you have saved.'}
             </Text>
           </Stack>
         </Group>
@@ -918,7 +918,7 @@ function App() {
                   </Stack>
                   <Group gap={4} wrap="nowrap" className="setup-row__actions">
                     <IconActionButton
-                      label="Open JSON panel"
+                      label="Open setup"
                       color="steel"
                       onClick={(event) => {
                         event.stopPropagation()
@@ -984,7 +984,7 @@ function App() {
             <IconPlus size={16} />
           </IconActionButton>
           <IconActionButton
-            label="Import a JSON setup"
+            label="Add a setup from your computer"
             color="steel"
             disabled={!selectedTrack}
             onClick={() => void handleImportClick()}
@@ -996,7 +996,7 @@ function App() {
 
       <Group grow>
         <TextInput
-          placeholder="Search local setups"
+          placeholder="Search saved setups"
           size="xs"
           value={localFilter}
           onChange={(event) => setLocalFilter(event.currentTarget.value)}
@@ -1025,10 +1025,10 @@ function App() {
           </Group>
         ) : localSetupsQuery.isError ? (
           <Group justify="center" align="center" h="100%">
-            <Alert color="red" title="Local setups could not be loaded">
+            <Alert color="red" title="Couldn't load your setups">
               {localSetupsQuery.error instanceof Error
                 ? localSetupsQuery.error.message
-                : 'The selected track could not be scanned.'}
+                : 'Try choosing the track again.'}
             </Alert>
           </Group>
         ) : (
@@ -1043,7 +1043,7 @@ function App() {
     <Stack gap="xs" h="100%" style={{ flex: 1, minHeight: 0 }}>
       <Group justify="space-between" align="flex-start" wrap="wrap">
         <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
-          {selectedTrack ? 'Preview and import baselines' : 'Select a track'}
+          {selectedTrack ? 'Browse community setups' : 'Choose a track'}
         </Text>
       </Group>
 
@@ -1079,7 +1079,7 @@ function App() {
                 onClick={() => void openExternal(activeRemoteSource.baseUrl)}
                 title="Open the source website in your browser"
               >
-                Open source page
+                Visit website
               </Button>
               <Button
                 variant="light"
@@ -1096,8 +1096,8 @@ function App() {
           </Group>
           <Text size="sm">
             {selectedTrack
-              ? `Browsing baselines for ${selectedCar?.displayName ?? 'the selected car'} at ${selectedTrack.displayName}. Downloads go straight into the selected track folder.`
-              : 'Choose a car and track first, then the remote browser will load baselines for that combination.'}
+              ? `Setups for ${selectedCar?.displayName ?? 'your car'} at ${selectedTrack.displayName}. Add one to save it with this track.`
+              : 'Choose a car and track to find matching community setups.'}
           </Text>
           <Text size="xs" c="dimmed">
             {activeRemoteSource.summary}
@@ -1106,7 +1106,7 @@ function App() {
       </Card>
 
       <TextInput
-        placeholder="Search remote setups"
+        placeholder="Search community setups"
         size="xs"
         disabled={!selectedTrack}
         value={remoteFilters[activeRemoteSource.id] ?? ''}
@@ -1120,11 +1120,10 @@ function App() {
               <ThemeIcon color="gray" variant="light">
                 <IconCloudOff size={16} />
               </ThemeIcon>
-              <Text fw={500}>Pick a track to browse remote baselines.</Text>
+              <Text fw={500}>Choose a track to browse community setups.</Text>
             </Group>
             <Text size="sm" c="dimmed">
-              The remote library follows the currently selected car and track so downloads land in
-              the right folder.
+              You will only see setups that match the car and track you choose.
             </Text>
           </Stack>
         ) : remoteQuery.isFetching && !remoteQuery.data ? (
@@ -1133,10 +1132,10 @@ function App() {
           </Group>
         ) : remoteQuery.isError ? (
           <Group justify="center" align="center" h="100%">
-            <Alert color="red" title="Remote source request failed">
+            <Alert color="red" title="Couldn't load community setups">
               {remoteQuery.error instanceof Error
                 ? remoteQuery.error.message
-                : 'The remote source request failed.'}
+                : 'Check your connection and try again.'}
             </Alert>
           </Group>
         ) : visibleRemoteItems.length ? (
@@ -1155,12 +1154,11 @@ function App() {
                 <IconCloudOff size={16} />
               </ThemeIcon>
               <Text fw={500}>
-                {remoteQuery.data?.message ?? 'No remote setups are available for this selection yet.'}
+                {remoteQuery.data?.message ?? 'No community setups are available for this car and track yet.'}
               </Text>
             </Group>
             <Text size="sm" c="dimmed">
-              If no entries appear, the selected car and track may not be covered by this source
-              yet.
+              Try a different source or check again later.
             </Text>
           </Stack>
         )}
@@ -1230,7 +1228,7 @@ function App() {
                     color={bootstrap.settings.rootStatus === 'ready' ? 'steel' : 'yellow'}
                     className="titlebar-badge"
                   >
-                    {bootstrap.settings.rootStatus === 'ready' ? 'Ready' : 'Check root'}
+                    {bootstrap.settings.rootStatus === 'ready' ? 'Ready' : 'Select folder'}
                   </Badge>
                   {bootstrapQuery.isFetching ? (
                     <Badge variant="light" color="steel">
@@ -1241,7 +1239,7 @@ function App() {
                 <Text size="xs" c="dimmed" className="titlebar-context">
                   {selectedTrack
                     ? `${selectedCar?.displayName ?? 'Selected car'} • ${selectedTrack.displayName}`
-                    : 'Pick a car and track to start browsing'}
+                    : 'Choose a car and track to get started'}
                 </Text>
               </Stack>
             </Group>
@@ -1309,7 +1307,7 @@ function App() {
               <Alert
                 icon={<IconAlertCircle size={16} />}
                 color="yellow"
-                title="Library refresh failed"
+                title="Couldn't refresh your library"
               >
                 {bootstrapRefreshError}
               </Alert>
@@ -1320,23 +1318,23 @@ function App() {
                 color={bootstrap.settings.rootStatus === 'invalid' ? 'red' : 'yellow'}
                 title={
                   bootstrap.settings.rootStatus === 'invalid'
-                    ? 'The selected setups folder is invalid'
+                    ? 'This folder does not contain ACC setups'
                     : 'ACC setups folder not found'
                 }
               >
                 <Group justify="space-between" align="center" wrap="nowrap">
                   <Text size="sm">
-                    ACC Setup Manager looks for
+                    Select the folder where ACC saves your setups. It is usually
                     {' '}
                     <Code>C:\Users\&lt;user&gt;\Documents\Assetto Corsa Competizione\Setups</Code>
-                    . Choose the folder manually to start browsing setups.
+                    .
                   </Text>
                   <Button
                     leftSection={<IconFolderOpen size={16} />}
                     onClick={() => void handlePickRoot()}
                     title="Choose the ACC setups folder manually"
                   >
-                    Choose folder
+                    Select folder
                   </Button>
                 </Group>
               </Alert>
@@ -1390,8 +1388,8 @@ function App() {
                         }}
                       >
                         <Tabs.List>
-                          <Tabs.Tab value="local">Local setups</Tabs.Tab>
-                          <Tabs.Tab value="remote">Remote setups</Tabs.Tab>
+                          <Tabs.Tab value="local">My setups</Tabs.Tab>
+                          <Tabs.Tab value="remote">Community setups</Tabs.Tab>
                         </Tabs.List>
 
                         <Tabs.Panel value="local" pt="xs">
@@ -1419,7 +1417,7 @@ function App() {
             <Group gap="xs" wrap="wrap">
               <Text fw={700}>{openDocument.title}</Text>
               <Badge variant="light" color={openDocument.readOnly ? 'dark' : 'steel'}>
-                {openDocument.readOnly ? 'Read-only preview' : 'Editable JSON'}
+                {openDocument.readOnly ? 'Preview only' : 'Ready to edit'}
               </Badge>
               <Badge variant="light" color={openDocument.dirty ? 'red' : 'steel'}>
                 {openDocument.dirty ? 'Unsaved changes' : 'Saved'}
@@ -1443,14 +1441,14 @@ function App() {
                     leftSection={<IconDownload size={16} />}
                     loading={remoteDownloadMutation.isPending}
                     onClick={() => void requestPreviewDownload()}
-                    title="Download this preview into the selected local track folder"
+                    title="Add this setup to the selected track"
                   >
                     Download
                   </Button>
                 ) : null}
                 {openDocument.remoteDownload?.sourcePageUrl ? (
                   <IconActionButton
-                    label="Open source page"
+                    label="Visit website"
                     variant="light"
                     size="lg"
                     onClick={() =>
@@ -1470,7 +1468,7 @@ function App() {
                         content: openDocument.content,
                       })
                     }
-                    title="Save the current setup file"
+                    title="Save your changes"
                   >
                     Save
                   </Button>
@@ -1481,7 +1479,7 @@ function App() {
               fallback={
                 <Card withBorder radius="md" className="editor-shell" p="md">
                   <Stack gap="xs" justify="center" h="100%">
-                    <Text fw={600}>Loading editor</Text>
+                    <Text fw={600}>Opening setup</Text>
                     <Loader size="sm" />
                   </Stack>
                 </Card>
@@ -1506,7 +1504,7 @@ function App() {
       >
         <Stack>
           <TextInput
-            label="File name"
+            label="Setup name"
             placeholder="my-setup.json"
             value={renameModal?.fileName ?? ''}
             onChange={(event) =>
@@ -1559,14 +1557,9 @@ function App() {
       >
         <Stack>
           <Text size="sm" c="dimmed">
-            Copy
-            {' '}
-            <strong>{copySetupModal?.setup.displayName}</strong>
-            {' '}
-            into other tracks for
-            {' '}
-            <strong>{copySourceCar?.displayName ?? 'this car'}</strong>
-            . Existing name conflicts are renamed automatically with a copy suffix.
+            Add <strong>{copySetupModal?.setup.displayName}</strong> to other tracks for{' '}
+            <strong>{copySourceCar?.displayName ?? 'this car'}</strong>. If a setup already has this
+            name, the copy will be given a new name.
           </Text>
           <Stack gap="xs">
             <Group justify="space-between" align="center" wrap="wrap" gap="xs">
@@ -1677,8 +1670,7 @@ function App() {
             from the selected track?
           </Text>
           <Text size="sm" c="dimmed">
-            The file is moved out of the ACC folder immediately and can be restored with Undo in the
-            current session.
+            You can bring it back with Undo while this app is open.
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setDeleteCandidate(null)}>
@@ -1698,15 +1690,15 @@ function App() {
       <Modal opened={settingsOpened} onClose={() => setSettingsOpened(false)} title="Settings">
         <Stack>
           <Text size="sm" c="dimmed">
-            The app auto-detects the default ACC setups folder and stores an optional manual override.
+            Choose where ACC saves your setups if the app cannot find the folder automatically.
           </Text>
           <TextInput
-            label="Detected root"
+            label="Folder found automatically"
             value={bootstrap.settings.detectedRoot ?? 'Not found'}
             readOnly
           />
           <TextInput
-            label="Manual override"
+            label="Folder you selected"
             value={bootstrap.settings.manualRoot ?? ''}
             placeholder="Not set"
             readOnly
@@ -1722,14 +1714,14 @@ function App() {
               loading={rootMutation.isPending}
               onClick={() => void rootMutation.mutateAsync(null)}
             >
-              Clear override
+              Use automatic folder
             </Button>
           </Group>
           <Divider />
           <TextInput
-            label="Default import file name override"
-            description="Optional file name used when importing through the toolbar."
-            placeholder="Leave blank to use the original file name"
+            label="Name for the next imported setup"
+            description="Leave blank to keep the setup's original name."
+            placeholder="Keep the original name"
             value={pendingImportName}
             onChange={(event) => setPendingImportName(event.currentTarget.value)}
           />
@@ -1737,8 +1729,8 @@ function App() {
             value={importOverwrite ? 'overwrite' : 'rename'}
             onChange={(value) => setImportOverwrite(value === 'overwrite')}
             data={[
-              { value: 'rename', label: 'Rename on conflict' },
-              { value: 'overwrite', label: 'Overwrite on conflict' },
+              { value: 'rename', label: 'Keep both setups' },
+              { value: 'overwrite', label: 'Replace existing setup' },
             ]}
           />
         </Stack>
@@ -1747,18 +1739,13 @@ function App() {
       <Modal
         opened={Boolean(remoteInstallModal)}
         onClose={() => setRemoteInstallModal(null)}
-        title="Install remote setup to tracks"
+        title="Add setup to tracks"
       >
         <Stack>
           <Text size="sm" c="dimmed">
-            Install
-            {' '}
-            <strong>{getSetupTitleFromFileName(remoteInstallModal?.fileName ?? '')}</strong>
-            {' '}
-            into one or more tracks for
-            {' '}
-            <strong>{selectedCar?.displayName ?? 'this car'}</strong>
-            . Existing name conflicts are renamed automatically with a copy suffix.
+            Add <strong>{getSetupTitleFromFileName(remoteInstallModal?.fileName ?? '')}</strong> to
+            one or more tracks for <strong>{selectedCar?.displayName ?? 'this car'}</strong>. If a
+            setup already has this name, the new one will be given a different name.
           </Text>
           <Stack gap="xs">
             <Group justify="space-between" align="center" wrap="wrap" gap="xs">

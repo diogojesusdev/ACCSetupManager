@@ -448,7 +448,7 @@ export function HybridSetupEditor({
             <Stack gap={4}>
               <Text fw={600}>{label}</Text>
               <Text size="sm" c="dimmed">
-                This array is empty, so there are no structured fields to show here yet.
+                Nothing has been added here yet.
               </Text>
             </Stack>
           </Card>
@@ -573,17 +573,17 @@ export function HybridSetupEditor({
   const renderStructuredContent = () => {
     if (parsed.kind === 'invalid') {
       return (
-        <Alert color="red" title="Structured editor unavailable">
-          Fix the JSON syntax in Raw mode before switching back. Current parse error: {parsed.error}
+        <Alert color="red" title="Can't show the setup fields">
+          Fix the setup text in Raw mode, then switch back here. Problem: {parsed.error}
         </Alert>
       )
     }
 
     if (parsed.kind === 'non-object') {
       return (
-        <Alert color="orange" title="Structured editor unavailable">
-          This document is valid JSON, but it is not a JSON object. The structured editor only works
-          with object-shaped setup documents.
+        <Alert color="orange" title="Can't show the setup fields">
+          This file is not in the format needed to show individual setup fields. You can still view
+          it in Raw mode.
         </Alert>
       )
     }
@@ -601,19 +601,19 @@ export function HybridSetupEditor({
           <Stack gap="sm">
             <Text fw={600}>This setup is empty.</Text>
             <Text size="sm" c="dimmed">
-              Start from an ACC-shaped scaffold to edit grouped fields instead of hand-writing JSON.
+              Add the standard ACC fields to start editing this setup.
             </Text>
             {!readOnly ? (
               <Group>
                 <Button
                   leftSection={<IconWand size={16} />}
                   onClick={insertAccScaffold}
-                  title="Adds the standard ACC setup sections and fields that are currently missing, without overwriting existing values."
+                  title="Adds standard ACC setup fields without changing any values already here."
                 >
-                  Fill missing ACC sections
+                  Add standard ACC fields
                 </Button>
                 <Text size="sm" c="dimmed">
-                  Raw mode is still available if you want full manual control.
+                  You can always use Raw mode to edit the full setup file.
                 </Text>
               </Group>
             ) : null}
@@ -625,9 +625,8 @@ export function HybridSetupEditor({
     return (
       <div className="structured-editor-body">
         {!readOnly && !hasAccSections(parsed.value) ? (
-          <Alert color="orange" title="ACC sections are missing" className="structured-inline-alert">
-            This file can still be edited structurally, but it does not yet contain the usual
-            basic/advanced ACC setup sections.
+          <Alert color="orange" title="Some ACC fields are missing" className="structured-inline-alert">
+            You can still edit this setup here. Add the standard ACC fields to see the usual sections.
           </Alert>
         ) : null}
         {tabs.length ? (
@@ -688,7 +687,7 @@ export function HybridSetupEditor({
           />
           {mode === 'structured' && parsed.kind === 'object' ? (
             <Text size="xs" c="dimmed">
-              Grouped fields are the default; raw JSON stays available for edge cases.
+              Use the grouped fields for everyday changes. Raw mode is available when you need it.
             </Text>
           ) : null}
         </Group>
@@ -698,9 +697,9 @@ export function HybridSetupEditor({
             variant="light"
             leftSection={<IconWand size={16} />}
             onClick={insertAccScaffold}
-            title="Adds the standard ACC setup sections and fields that are currently missing, without overwriting existing values."
+            title="Adds standard ACC setup fields without changing any values already here."
           >
-            Fill missing ACC sections
+            Add standard ACC fields
           </Button>
         ) : null}
       </Group>
