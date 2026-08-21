@@ -123,10 +123,10 @@ describe('setup editor helpers', () => {
       }),
     )
 
-    const button = screen.getAllByRole('button', { name: 'Fill missing ACC sections' })[0]
+    const button = screen.getAllByRole('button', { name: 'Add standard ACC fields' })[0]
     expect(button).toHaveAttribute(
       'title',
-      'Adds the standard ACC setup sections and fields that are currently missing, without overwriting existing values.',
+      'Adds standard ACC setup fields without changing any values already here.',
     )
   })
 })

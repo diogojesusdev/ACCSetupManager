@@ -36,12 +36,11 @@ jobs:
         run: npm ci
 
       - name: Build and publish Tauri release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          projectPath: .
           tagName: ${{ inputs.release-tag }}
           releaseName: ACC Setup Manager ${{ inputs.release-tag }}
           releaseDraft: ${{ inputs.draft }}
-          includeDebug: false
-          updaterJsonKeepUniversal: true
