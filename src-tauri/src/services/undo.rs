@@ -12,6 +12,10 @@ pub enum UndoOperation {
         path: PathBuf,
         staged_path: Option<PathBuf>,
     },
+    Copy {
+        paths: Vec<PathBuf>,
+        staged_paths: Vec<PathBuf>,
+    },
     Rename {
         from: PathBuf,
         to: PathBuf,
@@ -75,6 +79,7 @@ impl UndoOperation {
     pub fn label(&self) -> String {
         match self {
             Self::Create { .. } => "Undo create".to_owned(),
+            Self::Copy { .. } => "Undo copy".to_owned(),
             Self::Rename { .. } => "Undo rename".to_owned(),
             Self::Delete { .. } => "Undo delete".to_owned(),
         }
@@ -94,6 +99,16 @@ impl UndoOperation {
                 }
 
                 Ok(Self::Create { path, staged_path })
+            }
+            Self::Copy { paths, staged_paths } => {
+                for (path, staged_path) in paths.iter().zip(staged_paths.iter()) {
+                    if path.exists() {
+                        stage_file_copy(path, staging_dir, Some(staged_path))?;
+                        fs::remove_file(path)?;
+                    }
+                }
+
+                Ok(Self::Copy { paths, staged_paths })
             }
             Self::Rename { from, to } => {
                 if to.exists() {
@@ -133,6 +148,17 @@ impl UndoOperation {
                 }
 
                 Ok(Self::Create { path, staged_path })
+            }
+            Self::Copy { paths, staged_paths } => {
+                for (path, staged_path) in paths.iter().zip(staged_paths.iter()) {
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+
+                    fs::copy(staged_path, path)?;
+                }
+
+                Ok(Self::Copy { paths, staged_paths })
             }
             Self::Rename { from, to } => {
                 if from.exists() {

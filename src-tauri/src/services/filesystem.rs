@@ -58,6 +58,11 @@ pub fn read_setup_document(state: &AppState, path: &Path) -> AppResult<SetupDocu
     })
 }
 
+pub fn load_local_setups(state: &AppState, track_path: &Path) -> AppResult<Vec<LocalSetup>> {
+    let track_path = validate_existing_track_path(state, track_path)?;
+    scan_track_setups(&track_path)
+}
+
 pub fn save_local_setup(state: &AppState, path: &Path, content: &str) -> AppResult<PathBuf> {
     let path = validate_existing_setup_path(state, path)?;
     validate_json(content)?;
@@ -125,6 +130,86 @@ pub fn import_local_setup(
     write_setup_into_track(state, track_path, target_file_name, &content, overwrite)
 }
 
+pub fn copy_local_setup_to_tracks(
+    state: &AppState,
+    source_path: &Path,
+    target_track_paths: &[String],
+) -> AppResult<Vec<PathBuf>> {
+    let source_path = validate_existing_setup_path(state, source_path)?;
+    let source_track_path = source_path
+        .parent()
+        .ok_or_else(|| AppError::from("The selected setup path is invalid."))?
+        .to_path_buf();
+    let source_car_path = source_track_path
+        .parent()
+        .ok_or_else(|| AppError::from("The selected setup path is invalid."))?
+        .to_path_buf();
+    let source_file_name = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| AppError::from("The selected setup file name is invalid."))?;
+
+    if target_track_paths.is_empty() {
+        return Err(AppError::from("Select at least one destination track."));
+    }
+
+    let mut validated_tracks = Vec::new();
+    for target_track_path in target_track_paths {
+        let target_track = validate_existing_track_path(state, Path::new(target_track_path))?;
+
+        if validated_tracks.iter().any(|path| path == &target_track) {
+            continue;
+        }
+
+        if target_track == source_track_path {
+            return Err(AppError::from(
+                "The current track cannot be selected as a copy destination.",
+            ));
+        }
+
+        let target_car_path = target_track.parent().ok_or_else(|| {
+            AppError::from("The selected destination track path is invalid.")
+        })?;
+        if target_car_path != source_car_path {
+            return Err(AppError::from(
+                "Setups can only be copied into tracks for the same car.",
+            ));
+        }
+
+        validated_tracks.push(target_track);
+    }
+
+    if validated_tracks.is_empty() {
+        return Err(AppError::from("Select at least one destination track."));
+    }
+
+    let target_paths = validated_tracks
+        .iter()
+        .map(|track_path| unique_copy_target_path(track_path, source_file_name))
+        .collect::<Vec<_>>();
+
+    let mut created_paths: Vec<PathBuf> = Vec::new();
+    for target_path in &target_paths {
+        if let Err(error) = fs::copy(&source_path, target_path) {
+            for created_path in &created_paths {
+                fs::remove_file(created_path).map_err(|cleanup_error| {
+                    AppError::from(format!(
+                        "Copying the setup failed and the rollback also failed for {}: {}",
+                        created_path.display(),
+                        cleanup_error
+                    ))
+                })?;
+            }
+
+            return Err(error.into());
+        }
+
+        created_paths.push(target_path.clone());
+    }
+
+    Ok(target_paths)
+}
+
 pub fn write_setup_into_track(
     state: &AppState,
     track_path: &Path,
@@ -150,7 +235,6 @@ fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
 
     let mut cars = Vec::new();
     let mut tracks = Vec::new();
-    let mut local_setups = Vec::new();
 
     for car_entry in sorted_directory_entries(&root, true)? {
         let car_path = car_entry.path();
@@ -168,7 +252,7 @@ fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
         for track_entry in track_entries {
             let track_path = track_entry.path();
             let track_folder_name = track_entry.file_name().to_string_lossy().into_owned();
-            let setup_entries = sorted_directory_entries(&track_path, false)?;
+            let setup_count = count_directory_entries(&track_path, false)?;
 
             tracks.push(Track {
                 id: path_to_string(&track_path),
@@ -176,40 +260,42 @@ fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
                 folder_name: track_folder_name.clone(),
                 display_name: prettify_name(&track_folder_name),
                 absolute_path: path_to_string(&track_path),
-                setup_count: setup_entries.len(),
+                setup_count,
             });
-
-            for setup_entry in setup_entries {
-                let setup_path = setup_entry.path();
-                let metadata = setup_entry.metadata()?;
-                let file_name = setup_entry.file_name().to_string_lossy().into_owned();
-                let stem = setup_path
-                    .file_stem()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or(&file_name);
-
-                local_setups.push(LocalSetup {
-                    id: path_to_string(&setup_path),
-                    track_id: path_to_string(&track_path),
-                    file_name: file_name.clone(),
-                    display_name: prettify_name(stem),
-                    absolute_path: path_to_string(&setup_path),
-                    last_modified_at: format_system_time(
-                        metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                    ),
-                    file_extension: setup_path
-                        .extension()
-                        .and_then(|value| value.to_str())
-                        .map(str::to_owned),
-                });
-            }
         }
     }
 
-    Ok(LocalLibrary {
-        cars,
-        tracks,
-        local_setups,
+    Ok(LocalLibrary { cars, tracks })
+}
+
+fn scan_track_setups(track_path: &Path) -> AppResult<Vec<LocalSetup>> {
+    let track_id = path_to_string(track_path);
+    sorted_directory_entries(track_path, false)?
+        .into_iter()
+        .map(|setup_entry| build_local_setup(setup_entry, &track_id))
+        .collect()
+}
+
+fn build_local_setup(setup_entry: fs::DirEntry, track_id: &str) -> AppResult<LocalSetup> {
+    let setup_path = setup_entry.path();
+    let metadata = setup_entry.metadata()?;
+    let file_name = setup_entry.file_name().to_string_lossy().into_owned();
+    let stem = setup_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(&file_name);
+
+    Ok(LocalSetup {
+        id: path_to_string(&setup_path),
+        track_id: track_id.to_owned(),
+        file_name: file_name.clone(),
+        display_name: prettify_name(stem),
+        absolute_path: path_to_string(&setup_path),
+        last_modified_at: format_system_time(metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH)),
+        file_extension: setup_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_owned),
     })
 }
 
@@ -274,9 +360,60 @@ fn sorted_directory_entries(path: &Path, directories_only: bool) -> AppResult<Ve
     Ok(entries)
 }
 
+fn count_directory_entries(path: &Path, directories_only: bool) -> AppResult<usize> {
+    Ok(fs::read_dir(path)?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|file_type| {
+                    if directories_only {
+                        file_type.is_dir()
+                    } else {
+                        file_type.is_file()
+                    }
+                })
+                .unwrap_or(false)
+        })
+        .count())
+}
+
 fn validate_json(content: &str) -> AppResult<()> {
     serde_json::from_str::<serde_json::Value>(content)?;
     Ok(())
+}
+
+fn unique_copy_target_path(track_path: &Path, file_name: &str) -> PathBuf {
+    let preferred_path = track_path.join(file_name);
+    if !preferred_path.exists() {
+        return preferred_path;
+    }
+
+    let file_path = Path::new(file_name);
+    let stem = file_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(file_name);
+    let extension = file_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{value}"))
+        .unwrap_or_default();
+
+    let mut index = 1usize;
+    loop {
+        let suffix = if index == 1 {
+            " (copy)".to_owned()
+        } else {
+            format!(" (copy {index})")
+        };
+        let candidate = track_path.join(format!("{stem}{suffix}{extension}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        index += 1;
+    }
 }
 
 fn sanitize_file_name(file_name: &str) -> AppResult<String> {
@@ -343,4 +480,41 @@ fn format_system_time(value: SystemTime) -> String {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unique_copy_target_path;
+    use std::fs;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    fn create_temp_dir() -> PathBuf {
+        let path = std::env::temp_dir().join(format!("acc-setup-manager-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
+    }
+
+    #[test]
+    fn picks_original_name_when_destination_is_free() {
+        let temp_dir = create_temp_dir();
+        let target_path = unique_copy_target_path(&temp_dir, "race.json");
+
+        assert_eq!(target_path, temp_dir.join("race.json"));
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn appends_incrementing_copy_suffix_when_needed() {
+        let temp_dir = create_temp_dir();
+        fs::write(temp_dir.join("race.json"), "{}").expect("write original");
+        fs::write(temp_dir.join("race (copy).json"), "{}").expect("write first copy");
+
+        let target_path = unique_copy_target_path(&temp_dir, "race.json");
+
+        assert_eq!(target_path, temp_dir.join("race (copy 2).json"));
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
 }
