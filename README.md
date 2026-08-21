@@ -24,6 +24,12 @@ The first remote adapter is now implemented for **Simply Lovely Setups**, based 
 - **Deferred in app:** ACCCarSetups and Parc Ferme, with the report findings surfaced in their tabs
 - **Current backend approach:** the Tauri service discovers the site-bundled public API key at runtime, fetches the verified JSON API directly, caches list/detail payloads in SQLite, and transforms detail payloads into the downloaded `.json` file format
 
+## GitHub Pages
+
+- Concise project site: `docs\index.html`
+- Deployment workflow: `.github\workflows\deploy-pages.yml`
+- Repository setting to enable once on GitHub: **Pages** -> **Build and deployment** -> **GitHub Actions**
+
 ## Local development
 
 ### Prerequisites
