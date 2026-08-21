@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import {
   ActionIcon,
   Alert,
@@ -8,12 +8,12 @@ import {
   Box,
   Button,
   Card,
+  Checkbox,
   Code,
   Divider,
   Group,
   Loader,
   Modal,
-  MultiSelect,
   NativeSelect,
   Paper,
   ScrollArea,
@@ -61,7 +61,7 @@ import {
   copyLocalSetupToTracks,
   createLocalSetup,
   deleteLocalSetup,
-  downloadRemoteSetup,
+  downloadRemoteSetupToTracks,
   importLocalSetup,
   loadLocalSetups,
   loadAppBootstrap,
@@ -84,12 +84,16 @@ import {
   sortRemoteSetups,
   type LocalSortMode,
 } from './lib/setup-list'
-import { HybridSetupEditor } from './lib/setup-editor'
+import { loadCachedBootstrap, saveCachedBootstrap } from './lib/bootstrap-cache'
 import { useAppStore } from './state/app-store'
 import type { AppBootstrap, LocalSetup, MutationResult, RemoteSetup } from './types/models'
 
 const bootstrapQueryKey = ['bootstrap']
 const localSetupsQueryKey = ['local-setups'] as const
+const HybridSetupEditor = lazy(async () => {
+  const module = await import('./lib/setup-editor')
+  return { default: module.HybridSetupEditor }
+})
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
   timeStyle: 'short',
@@ -100,11 +104,11 @@ type RenameModalState =
   | { mode: 'rename'; setup: LocalSetup; fileName: string }
   | null
 
-type RemoteDownloadModalState = {
+type RemoteInstallModalState = {
   sourceId: string
   remoteSetupId: string
   fileName: string
-  overwrite: boolean
+  targetTrackIds: string[]
 }
 
 type CopySetupModalState = {
@@ -170,8 +174,8 @@ function App() {
   const [pendingImportName, setPendingImportName] = useState('')
   const [copySetupModal, setCopySetupModal] = useState<CopySetupModalState | null>(null)
   const [setupWorkspaceTab, setSetupWorkspaceTab] = useState<SetupWorkspaceTab>('local')
-  const [remoteDownloadModal, setRemoteDownloadModal] =
-    useState<RemoteDownloadModalState | null>(null)
+  const [remoteInstallModal, setRemoteInstallModal] =
+    useState<RemoteInstallModalState | null>(null)
 
   const {
     selectedCarId,
@@ -200,9 +204,16 @@ function App() {
   const bootstrapQuery = useQuery({
     queryKey: bootstrapQueryKey,
     queryFn: loadAppBootstrap,
+    placeholderData: loadCachedBootstrap,
   })
 
   const bootstrap = bootstrapQuery.data
+
+  useEffect(() => {
+    if (bootstrap && !bootstrapQuery.isPlaceholderData) {
+      saveCachedBootstrap(bootstrap)
+    }
+  }, [bootstrap, bootstrapQuery.isPlaceholderData])
 
   const selectedCar = bootstrap?.library.cars.find((car) => car.id === selectedCarId)
   const visibleTracks = useMemo(
@@ -306,62 +317,42 @@ function App() {
     })
   }
 
-  const startRemoteDownload = async ({
+  const openRemoteInstallModal = ({
     sourceId,
     remoteSetupId,
     fileName,
-    overwrite,
-  }: RemoteDownloadModalState) => {
+  }: Omit<RemoteInstallModalState, 'targetTrackIds'>) => {
     if (!selectedTrack) {
       showError('Download unavailable', 'Select a track folder first.')
       return
     }
-
-    try {
-      await remoteDownloadMutation.mutateAsync({
-        sourceId,
-        remoteSetupId,
-        trackPath: selectedTrack.id,
-        targetFileName: fileName,
-        overwrite,
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (message.includes('already exists')) {
-        setRemoteDownloadModal({
-          sourceId,
-          remoteSetupId,
-          fileName,
-          overwrite,
-        })
-        return
-      }
-
-      showError('Unable to download remote setup', error)
-    }
-  }
-
-  const requestRemoteDownload = async (setup: RemoteSetup) => {
-    setSelectedRemoteSetupId(setup.sourceId, setup.id)
-    await startRemoteDownload({
-      sourceId: setup.sourceId,
-      remoteSetupId: setup.id,
-      fileName: setup.fileName,
-      overwrite: false,
+    setRemoteInstallModal({
+      sourceId,
+      remoteSetupId,
+      fileName,
+      targetTrackIds: [selectedTrack.id],
     })
   }
 
-  const requestPreviewDownload = async () => {
+  const requestRemoteDownload = (setup: RemoteSetup) => {
+    setSelectedRemoteSetupId(setup.sourceId, setup.id)
+    openRemoteInstallModal({
+      sourceId: setup.sourceId,
+      remoteSetupId: setup.id,
+      fileName: setup.fileName,
+    })
+  }
+
+  const requestPreviewDownload = () => {
     const descriptor = openDocument?.remoteDownload
     if (!descriptor) {
       return
     }
 
-    await startRemoteDownload({
+    openRemoteInstallModal({
       sourceId: descriptor.sourceId,
       remoteSetupId: descriptor.remoteSetupId,
       fileName: descriptor.suggestedFileName,
-      overwrite: false,
     })
   }
 
@@ -498,27 +489,26 @@ function App() {
     mutationFn: ({
       sourceId,
       remoteSetupId,
-      trackPath,
+      targetTrackPaths,
       targetFileName,
-      overwrite,
     }: {
       sourceId: string
       remoteSetupId: string
-      trackPath: string
+      targetTrackPaths: string[]
       targetFileName: string
-      overwrite: boolean
     }) =>
-      downloadRemoteSetup({
+      downloadRemoteSetupToTracks({
         sourceId,
         remoteSetupId,
-        trackPath,
+        targetTrackPaths,
         targetFileName,
-        overwrite,
       }),
-    onSuccess: (result) => {
-      applyMutationResult(result, 'Remote setup downloaded.')
-      setRemoteDownloadModal(null)
+    onSuccess: (result, variables) => {
+      const count = variables.targetTrackPaths.length
+      applyMutationResult(result, `Remote setup installed to ${count} track${count === 1 ? '' : 's'}.`)
+      setRemoteInstallModal(null)
     },
+    onError: (error) => showError('Unable to download remote setup', error),
   })
 
   const rootMutation = useMutation({
@@ -620,25 +610,28 @@ function App() {
     })
   }
 
-  if (bootstrapQuery.isLoading) {
+  if (!bootstrap) {
     return (
-      <Group justify="center" align="center" mih="100vh">
-        <Loader size="lg" />
-      </Group>
+      bootstrapQuery.isError ? (
+        <Group justify="center" align="center" mih="100vh" p="xl">
+          <Alert color="red" title="ACC Setup Manager could not start">
+            {bootstrapQuery.error instanceof Error
+              ? bootstrapQuery.error.message
+              : 'An unknown startup error occurred.'}
+          </Alert>
+        </Group>
+      ) : (
+        <Group justify="center" align="center" mih="100vh">
+          <Loader size="lg" />
+        </Group>
+      )
     )
   }
 
-  if (bootstrapQuery.isError || !bootstrap) {
-    return (
-      <Group justify="center" align="center" mih="100vh" p="xl">
-        <Alert color="red" title="ACC Setup Manager could not start">
-          {bootstrapQuery.error instanceof Error
-            ? bootstrapQuery.error.message
-            : 'An unknown startup error occurred.'}
-        </Alert>
-      </Group>
-    )
-  }
+  const bootstrapRefreshError =
+    bootstrapQuery.isError && bootstrapQuery.error instanceof Error
+      ? bootstrapQuery.error.message
+      : null
 
   const selectCar = (carId: string) => {
     const carTracks = bootstrap.library.tracks.filter((track) => track.carId === carId)
@@ -1180,7 +1173,9 @@ function App() {
     filterRemoteSetups(remoteQuery.data?.items ?? [], remoteFilter),
   )
   const copySourceTrack = copySetupModal
-    ? bootstrap.library.tracks.find((track) => track.id === copySetupModal.setup.trackId)
+    ? bootstrap.library.tracks.find((track) => track.id === copySetupModal.setup.trackId) ??
+      selectedTrack ??
+      null
     : null
   const copySourceCar = copySourceTrack
     ? bootstrap.library.cars.find((car) => car.id === copySourceTrack.carId)
@@ -1190,6 +1185,7 @@ function App() {
         (track) => track.carId === copySourceTrack.carId && track.id !== copySourceTrack.id,
       )
     : []
+  const remoteInstallDestinationTracks = visibleTracks
   const selectedRemoteSetup =
     visibleRemoteItems.find((setup) => setup.id === selectedRemoteSetupId) ??
     remoteQuery.data?.items.find((setup) => setup.id === selectedRemoteSetupId)
@@ -1236,6 +1232,11 @@ function App() {
                   >
                     {bootstrap.settings.rootStatus === 'ready' ? 'Ready' : 'Check root'}
                   </Badge>
+                  {bootstrapQuery.isFetching ? (
+                    <Badge variant="light" color="steel">
+                      Refreshing
+                    </Badge>
+                  ) : null}
                 </Group>
                 <Text size="xs" c="dimmed" className="titlebar-context">
                   {selectedTrack
@@ -1290,7 +1291,7 @@ function App() {
                 <IconSquare size={14} />
               </IconActionButton>
               <IconActionButton
-                label="Close window"
+                label="Hide to tray"
                 variant="subtle"
                 size="md"
                 color="red"
@@ -1304,6 +1305,15 @@ function App() {
 
         <AppShell.Main>
           <Stack gap="xs" p="xs" h="calc(100vh - 52px)">
+            {bootstrapRefreshError ? (
+              <Alert
+                icon={<IconAlertCircle size={16} />}
+                color="yellow"
+                title="Library refresh failed"
+              >
+                {bootstrapRefreshError}
+              </Alert>
+            ) : null}
             {bootstrap.settings.rootStatus !== 'ready' ? (
               <Alert
                 icon={<IconAlertCircle size={16} />}
@@ -1467,13 +1477,24 @@ function App() {
                 ) : null}
               </Group>
             </Group>
-            <HybridSetupEditor
-              documentId={openDocument.id}
-              title={openDocument.title}
-              content={openDocument.content}
-              readOnly={openDocument.readOnly}
-              onChange={updateOpenDocumentContent}
-            />
+            <Suspense
+              fallback={
+                <Card withBorder radius="md" className="editor-shell" p="md">
+                  <Stack gap="xs" justify="center" h="100%">
+                    <Text fw={600}>Loading editor</Text>
+                    <Loader size="sm" />
+                  </Stack>
+                </Card>
+              }
+            >
+              <HybridSetupEditor
+                documentId={openDocument.id}
+                title={openDocument.title}
+                content={openDocument.content}
+                readOnly={openDocument.readOnly}
+                onChange={updateOpenDocumentContent}
+              />
+            </Suspense>
           </Stack>
         ) : null}
       </Modal>
@@ -1547,32 +1568,80 @@ function App() {
             <strong>{copySourceCar?.displayName ?? 'this car'}</strong>
             . Existing name conflicts are renamed automatically with a copy suffix.
           </Text>
-          <MultiSelect
-            label="Destination tracks"
-            placeholder={
-              copyDestinationTracks.length
-                ? 'Select one or more tracks'
-                : 'No other tracks are available for this car'
-            }
-            data={copyDestinationTracks.map((track) => ({
-              value: track.id,
-              label: track.displayName,
-            }))}
-            value={copySetupModal?.targetTrackIds ?? []}
-            searchable
-            nothingFoundMessage="No tracks found"
-            disabled={!copyDestinationTracks.length}
-            onChange={(value) =>
-              setCopySetupModal((current) =>
-                current
-                  ? {
-                      ...current,
-                      targetTrackIds: value,
+          <Stack gap="xs">
+            <Group justify="space-between" align="center" wrap="wrap" gap="xs">
+              <Text size="sm" fw={600}>
+                Destination tracks
+              </Text>
+              {copyDestinationTracks.length ? (
+                <Group gap="xs">
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() =>
+                      setCopySetupModal((current) =>
+                        current
+                          ? {
+                              ...current,
+                              targetTrackIds: copyDestinationTracks.map((track) => track.id),
+                            }
+                          : current,
+                      )
                     }
-                  : current,
-              )
-            }
-          />
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() =>
+                      setCopySetupModal((current) =>
+                        current
+                          ? {
+                              ...current,
+                              targetTrackIds: [],
+                            }
+                          : current,
+                      )
+                    }
+                  >
+                    Unselect all
+                  </Button>
+                </Group>
+              ) : null}
+            </Group>
+            {copyDestinationTracks.length ? (
+              <Checkbox.Group
+                value={copySetupModal?.targetTrackIds ?? []}
+                onChange={(value) =>
+                  setCopySetupModal((current) =>
+                    current
+                      ? {
+                          ...current,
+                          targetTrackIds: value,
+                        }
+                      : current,
+                  )
+                }
+              >
+                <ScrollArea.Autosize mah={260} type="auto" offsetScrollbars>
+                  <Stack gap={8}>
+                    {copyDestinationTracks.map((track) => (
+                      <Checkbox
+                        key={track.id}
+                        value={track.id}
+                        label={`${track.displayName} (${track.setupCount} setup${track.setupCount === 1 ? '' : 's'})`}
+                      />
+                    ))}
+                  </Stack>
+                </ScrollArea.Autosize>
+              </Checkbox.Group>
+            ) : (
+              <Text size="sm" c="dimmed">
+                No other tracks are available for this car.
+              </Text>
+            )}
+          </Stack>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setCopySetupModal(null)}>
               Cancel
@@ -1676,62 +1745,113 @@ function App() {
       </Modal>
 
       <Modal
-        opened={Boolean(remoteDownloadModal)}
-        onClose={() => setRemoteDownloadModal(null)}
-        title="Resolve download conflict"
+        opened={Boolean(remoteInstallModal)}
+        onClose={() => setRemoteInstallModal(null)}
+        title="Install remote setup to tracks"
       >
         <Stack>
           <Text size="sm" c="dimmed">
-            A local setup with that file name already exists. Rename it or overwrite the existing
-            file.
+            Install
+            {' '}
+            <strong>{getSetupTitleFromFileName(remoteInstallModal?.fileName ?? '')}</strong>
+            {' '}
+            into one or more tracks for
+            {' '}
+            <strong>{selectedCar?.displayName ?? 'this car'}</strong>
+            . Existing name conflicts are renamed automatically with a copy suffix.
           </Text>
-          <TextInput
-            label="File name"
-            value={remoteDownloadModal?.fileName ?? ''}
-            onChange={(event) =>
-              setRemoteDownloadModal((current) =>
-                current
-                  ? {
-                      ...current,
-                      fileName: event.currentTarget.value,
+          <Stack gap="xs">
+            <Group justify="space-between" align="center" wrap="wrap" gap="xs">
+              <Text size="sm" fw={600}>
+                Destination tracks
+              </Text>
+              {remoteInstallDestinationTracks.length ? (
+                <Group gap="xs">
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() =>
+                      setRemoteInstallModal((current) =>
+                        current
+                          ? {
+                              ...current,
+                              targetTrackIds: remoteInstallDestinationTracks.map((track) => track.id),
+                            }
+                          : current,
+                      )
                     }
-                  : current,
-              )
-            }
-          />
-          <SegmentedControl
-            value={remoteDownloadModal?.overwrite ? 'overwrite' : 'rename'}
-            onChange={(value) =>
-              setRemoteDownloadModal((current) =>
-                current
-                  ? {
-                      ...current,
-                      overwrite: value === 'overwrite',
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() =>
+                      setRemoteInstallModal((current) =>
+                        current
+                          ? {
+                              ...current,
+                              targetTrackIds: [],
+                            }
+                          : current,
+                      )
                     }
-                  : current,
-              )
-            }
-            data={[
-              { value: 'rename', label: 'Rename' },
-              { value: 'overwrite', label: 'Overwrite' },
-            ]}
-          />
+                  >
+                    Unselect all
+                  </Button>
+                </Group>
+              ) : null}
+            </Group>
+            {remoteInstallDestinationTracks.length ? (
+              <Checkbox.Group
+                value={remoteInstallModal?.targetTrackIds ?? []}
+                onChange={(value) =>
+                  setRemoteInstallModal((current) =>
+                    current
+                      ? {
+                          ...current,
+                          targetTrackIds: value,
+                        }
+                      : current,
+                  )
+                }
+              >
+                <ScrollArea.Autosize mah={260} type="auto" offsetScrollbars>
+                  <Stack gap={8}>
+                    {remoteInstallDestinationTracks.map((track) => (
+                      <Checkbox
+                        key={track.id}
+                        value={track.id}
+                        label={`${track.displayName} (${track.setupCount} setup${track.setupCount === 1 ? '' : 's'})`}
+                      />
+                    ))}
+                  </Stack>
+                </ScrollArea.Autosize>
+              </Checkbox.Group>
+            ) : (
+              <Text size="sm" c="dimmed">
+                No tracks are available for this car.
+              </Text>
+            )}
+          </Stack>
           <Group justify="flex-end">
-            <Button variant="default" onClick={() => setRemoteDownloadModal(null)}>
+            <Button variant="default" onClick={() => setRemoteInstallModal(null)}>
               Cancel
             </Button>
             <Button
               loading={remoteDownloadMutation.isPending}
-              disabled={!remoteDownloadModal?.fileName.trim()}
+              disabled={!remoteInstallModal?.targetTrackIds.length}
               onClick={() =>
-                remoteDownloadModal &&
-                void startRemoteDownload({
-                  ...remoteDownloadModal,
-                  fileName: remoteDownloadModal.fileName.trim(),
+                remoteInstallModal &&
+                void remoteDownloadMutation.mutateAsync({
+                  sourceId: remoteInstallModal.sourceId,
+                  remoteSetupId: remoteInstallModal.remoteSetupId,
+                  targetTrackPaths: remoteInstallModal.targetTrackIds,
+                  targetFileName: remoteInstallModal.fileName,
                 })
               }
             >
-              Download
+              Install
             </Button>
           </Group>
         </Stack>

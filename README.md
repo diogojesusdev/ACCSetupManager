@@ -7,11 +7,12 @@ Windows-first desktop app for browsing, editing, and organizing Assetto Corsa Co
 - Tauri 2 + React + TypeScript desktop shell
 - auto-detection of the default ACC setups root
 - manual root override stored in a local SQLite database
-- filesystem scan for cars, tracks, and local setup files
-- four-pane explorer layout with persistent in-memory selection state
-- raw JSON editor with explicit save and syntax-only validation
+- filesystem scan for cars and tracks with on-demand local setup loading
+- three-column explorer layout with dedicated local and remote setup workspaces
+- structured setup editor by default with raw JSON fallback, explicit save, and syntax-only validation
 - local create, rename, delete, and import flows
 - session-scoped undo/redo for create, rename, and delete
+- Windows system tray access with reopen and full-exit actions
 - live **Simply Lovely Setups** adapter with preview and download into the selected local track folder
 - SQLite-backed remote list and preview cache with stale fallback behavior
 - built-in deferment notes for the other researched v1 sources
