@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::error::AppResult;
-use crate::models::{AppBootstrap, MutationResult, RemoteSourceResult, SetupDocument};
+use crate::models::{AppBootstrap, LocalSetup, MutationResult, RemoteSourceResult, SetupDocument};
 use crate::services::filesystem;
 use crate::services::remote;
 use crate::services::settings;
@@ -29,6 +29,12 @@ pub fn set_manual_setup_root(
 pub fn read_setup_document(state: State<'_, AppState>, path: String) -> AppResult<SetupDocument> {
     let path_buf = PathBuf::from(path);
     filesystem::read_setup_document(&state, path_buf.as_path())
+}
+
+#[tauri::command]
+pub fn load_local_setups(state: State<'_, AppState>, track_path: String) -> AppResult<Vec<LocalSetup>> {
+    let track_path_buf = PathBuf::from(track_path);
+    filesystem::load_local_setups(&state, track_path_buf.as_path())
 }
 
 #[tauri::command]
@@ -104,6 +110,30 @@ pub fn import_local_setup(
         overwrite,
     )?;
     filesystem::mutation_result(&state, Some(imported_path))
+}
+
+#[tauri::command]
+pub fn copy_local_setup_to_tracks(
+    state: State<'_, AppState>,
+    source_path: String,
+    target_track_paths: Vec<String>,
+) -> AppResult<MutationResult> {
+    let source_path_buf = PathBuf::from(source_path);
+    let copied_paths =
+        filesystem::copy_local_setup_to_tracks(&state, source_path_buf.as_path(), &target_track_paths)?;
+    let staged_paths = copied_paths
+        .iter()
+        .map(|path| {
+            let staged_path = state.new_staged_file_path("copy")?;
+            std::fs::copy(path, &staged_path)?;
+            Ok(staged_path)
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+    state.undo_manager()?.push(UndoOperation::Copy {
+        paths: copied_paths,
+        staged_paths,
+    });
+    filesystem::mutation_result(&state, None)
 }
 
 #[tauri::command]

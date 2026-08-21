@@ -1,8 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import type {
   AppBootstrap,
+  LocalSetup,
   MutationResult,
   RemoteSourceResult,
   SetupDocument,
@@ -18,6 +20,10 @@ export async function setManualSetupRoot(path: string | null): Promise<AppBootst
 
 export async function readSetupDocument(path: string): Promise<SetupDocument> {
   return invoke<SetupDocument>('read_setup_document', { path })
+}
+
+export async function loadLocalSetups(trackPath: string): Promise<LocalSetup[]> {
+  return invoke<LocalSetup[]>('load_local_setups', { trackPath })
 }
 
 export async function saveLocalSetup(path: string, content: string): Promise<MutationResult> {
@@ -53,6 +59,16 @@ export async function importLocalSetup(
     sourcePath,
     targetFileName,
     overwrite,
+  })
+}
+
+export async function copyLocalSetupToTracks(
+  sourcePath: string,
+  targetTrackPaths: string[],
+): Promise<MutationResult> {
+  return invoke<MutationResult>('copy_local_setup_to_tracks', {
+    sourcePath,
+    targetTrackPaths,
   })
 }
 
@@ -115,4 +131,48 @@ export async function chooseImportFile(): Promise<string | null> {
 
 export async function openExternal(url: string): Promise<void> {
   await openUrl(url)
+}
+
+function currentWindowOrNull() {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+    return null
+  }
+
+  return getCurrentWindow()
+}
+
+export async function minimizeCurrentWindow(): Promise<void> {
+  const appWindow = currentWindowOrNull()
+  if (!appWindow) {
+    return
+  }
+
+  await appWindow.minimize()
+}
+
+export async function startDraggingCurrentWindow(): Promise<void> {
+  const appWindow = currentWindowOrNull()
+  if (!appWindow) {
+    return
+  }
+
+  await appWindow.startDragging()
+}
+
+export async function toggleCurrentWindowMaximize(): Promise<void> {
+  const appWindow = currentWindowOrNull()
+  if (!appWindow) {
+    return
+  }
+
+  await appWindow.toggleMaximize()
+}
+
+export async function closeCurrentWindow(): Promise<void> {
+  const appWindow = currentWindowOrNull()
+  if (!appWindow) {
+    return
+  }
+
+  await appWindow.close()
 }
