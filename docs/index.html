@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="ACC Setup Manager is free, open source software for browsing, editing, and organizing Assetto Corsa Competizione setup files."
+    />
+    <title>ACC Setup Manager</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg-top: rgba(20, 22, 24, 0.98);
+        --bg-bottom: rgba(10, 11, 12, 1);
+        --panel: rgba(14, 16, 18, 0.96);
+        --panel-strong: rgba(18, 21, 24, 0.94);
+        --border: rgba(188, 54, 36, 0.2);
+        --border-muted: rgba(214, 220, 226, 0.08);
+        --accent: #bc3624;
+        --text: #f3efe6;
+        --muted: #b7b3aa;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          Bahnschrift, "Arial Narrow", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        color: var(--text);
+        background:
+          repeating-linear-gradient(
+            90deg,
+            rgba(188, 54, 36, 0.06) 0,
+            rgba(188, 54, 36, 0.06) 2px,
+            transparent 2px,
+            transparent 18px
+          ),
+          linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .shell {
+        width: min(64rem, calc(100vw - 2rem));
+        margin: 0 auto;
+        padding: 3.5rem 0 4rem;
+      }
+
+      .hero,
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 0.55rem;
+      }
+
+      .hero {
+        padding: 1.4rem;
+      }
+
+      .kicker,
+      .eyebrow {
+        margin: 0 0 0.5rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.74rem;
+        color: var(--muted);
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(2.2rem, 8vw, 4.25rem);
+        line-height: 0.94;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .lead {
+        max-width: 40rem;
+        margin-top: 1rem;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.65;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-top: 1.3rem;
+      }
+
+      .button {
+        padding: 0.8rem 1rem;
+        border-radius: 0.4rem;
+        border: 1px solid rgba(214, 220, 226, 0.12);
+        background: var(--panel-strong);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+      }
+
+      .button--primary {
+        background: rgba(61, 20, 16, 0.45);
+        border-color: rgba(188, 54, 36, 0.52);
+        color: #fff2ec;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+      }
+
+      .panel {
+        padding: 1rem;
+      }
+
+      .panel h2 {
+        font-size: 0.88rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .panel p,
+      .list li {
+        margin-top: 0.45rem;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr);
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+      }
+
+      .list {
+        margin: 0.55rem 0 0;
+        padding-left: 1rem;
+      }
+
+      .list li + li {
+        margin-top: 0.45rem;
+      }
+
+      .footnote {
+        margin-top: 0.9rem;
+        font-size: 0.82rem;
+        color: #8f8a80;
+      }
+
+      @media (max-width: 780px) {
+        .shell {
+          width: min(100vw - 1rem, 64rem);
+          padding: 0.5rem 0 1rem;
+        }
+
+        .summary,
+        .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="kicker">Free and open source</p>
+        <h1>ACC Setup Manager</h1>
+        <p class="lead">
+          A Windows-first desktop app for browsing, editing, and organizing Assetto Corsa
+          Competizione setup files without leaving your local setup library behind.
+        </p>
+        <div class="actions">
+          <a class="button button--primary" id="source-link" href="#features">View source</a>
+          <a class="button" id="release-link" href="#features">Latest release</a>
+        </div>
+      </section>
+
+      <section class="summary" aria-label="Highlights">
+        <article class="panel">
+          <p class="eyebrow">Focus</p>
+          <h2>Local-first workflow</h2>
+          <p>Auto-detect your ACC setups folder, keep manual overrides, and work directly with real files.</p>
+        </article>
+        <article class="panel">
+          <p class="eyebrow">Editing</p>
+          <h2>Structured or raw</h2>
+          <p>Use the structured editor by default, then switch to raw JSON when you want full control.</p>
+        </article>
+        <article class="panel">
+          <p class="eyebrow">Remote</p>
+          <h2>Simply Lovely built in</h2>
+          <p>Preview, cache, and download verified remote setups into the currently selected track folder.</p>
+        </article>
+      </section>
+
+      <section class="grid" id="features">
+        <article class="panel">
+          <p class="eyebrow">Why it exists</p>
+          <h2>Minimal friction for setup management</h2>
+          <p>
+            ACC Setup Manager keeps setup files readable and organized while still staying close to the
+            actual ACC folder structure.
+          </p>
+        </article>
+        <article class="panel">
+          <p class="eyebrow">Included now</p>
+          <h2>What you get</h2>
+          <ul class="list">
+            <li>Three-column local explorer</li>
+            <li>Create, rename, import, delete, and undo</li>
+            <li>SQLite-backed cache for remote previews</li>
+            <li>Windows desktop app built with Tauri, React, and TypeScript</li>
+          </ul>
+        </article>
+      </section>
+
+      <p class="footnote">
+        Designed for GitHub Pages project sites. The source and release buttons resolve automatically when
+        hosted from <code>owner.github.io/repository</code>.
+      </p>
+    </main>
+
+    <script>
+      const repo = window.location.pathname.replace(/^\/+/, "").split("/")[0];
+      const owner = window.location.hostname.endsWith(".github.io")
+        ? window.location.hostname.split(".")[0]
+        : "";
+
+      if (owner && repo) {
+        const repoUrl = "https://github.com/" + owner + "/" + repo;
+        const sourceLink = document.getElementById("source-link");
+        const releaseLink = document.getElementById("release-link");
+
+        sourceLink.href = repoUrl;
+        releaseLink.href = repoUrl + "/releases/latest";
+      }
+    </script>
+  </body>
+</html>
