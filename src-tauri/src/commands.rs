@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::models::{AppBootstrap, LocalSetup, MutationResult, RemoteSourceResult, SetupDocument};
 use crate::services::filesystem;
 use crate::services::remote;
@@ -13,6 +13,26 @@ use crate::state::AppState;
 #[tauri::command]
 pub fn load_app_bootstrap(state: State<'_, AppState>) -> AppResult<AppBootstrap> {
     filesystem::load_bootstrap(&state)
+}
+
+#[tauri::command]
+pub fn frontend_ready(app: AppHandle) -> AppResult<()> {
+    if let Some(main_window) = app.get_webview_window("main") {
+        main_window
+            .show()
+            .map_err(|error| AppError::from(error.to_string()))?;
+        main_window
+            .set_focus()
+            .map_err(|error| AppError::from(error.to_string()))?;
+    }
+
+    if let Some(splashscreen_window) = app.get_webview_window("splashscreen") {
+        splashscreen_window
+            .close()
+            .map_err(|error| AppError::from(error.to_string()))?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -32,7 +52,10 @@ pub fn read_setup_document(state: State<'_, AppState>, path: String) -> AppResul
 }
 
 #[tauri::command]
-pub fn load_local_setups(state: State<'_, AppState>, track_path: String) -> AppResult<Vec<LocalSetup>> {
+pub fn load_local_setups(
+    state: State<'_, AppState>,
+    track_path: String,
+) -> AppResult<Vec<LocalSetup>> {
     let track_path_buf = PathBuf::from(track_path);
     filesystem::load_local_setups(&state, track_path_buf.as_path())
 }
@@ -83,8 +106,7 @@ pub fn rename_local_setup(
 #[tauri::command]
 pub fn delete_local_setup(state: State<'_, AppState>, path: String) -> AppResult<MutationResult> {
     let path_buf = PathBuf::from(path);
-    let (original_path, staged_path) =
-        filesystem::delete_local_setup(&state, path_buf.as_path())?;
+    let (original_path, staged_path) = filesystem::delete_local_setup(&state, path_buf.as_path())?;
     state.undo_manager()?.push(UndoOperation::Delete {
         original_path,
         staged_path,
@@ -119,8 +141,11 @@ pub fn copy_local_setup_to_tracks(
     target_track_paths: Vec<String>,
 ) -> AppResult<MutationResult> {
     let source_path_buf = PathBuf::from(source_path);
-    let copied_paths =
-        filesystem::copy_local_setup_to_tracks(&state, source_path_buf.as_path(), &target_track_paths)?;
+    let copied_paths = filesystem::copy_local_setup_to_tracks(
+        &state,
+        source_path_buf.as_path(),
+        &target_track_paths,
+    )?;
     let staged_paths = copied_paths
         .iter()
         .map(|path| {
@@ -197,4 +222,34 @@ pub fn download_remote_setup(
         overwrite.unwrap_or(false),
     )?;
     filesystem::mutation_result(&state, Some(imported_path))
+}
+
+#[tauri::command]
+pub fn download_remote_setup_to_tracks(
+    state: State<'_, AppState>,
+    source_id: String,
+    remote_setup_id: String,
+    target_track_paths: Vec<String>,
+    target_file_name: String,
+) -> AppResult<MutationResult> {
+    let imported_paths = remote::download_remote_setup_to_tracks(
+        &state,
+        &source_id,
+        &remote_setup_id,
+        &target_track_paths,
+        &target_file_name,
+    )?;
+    let staged_paths = imported_paths
+        .iter()
+        .map(|path| {
+            let staged_path = state.new_staged_file_path("remote-download")?;
+            std::fs::copy(path, &staged_path)?;
+            Ok(staged_path)
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+    state.undo_manager()?.push(UndoOperation::Copy {
+        paths: imported_paths.clone(),
+        staged_paths,
+    });
+    filesystem::mutation_result(&state, imported_paths.first().cloned())
 }

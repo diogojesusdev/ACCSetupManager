@@ -37,7 +37,6 @@ export interface LocalSetup {
 export interface LocalLibrary {
   cars: Car[]
   tracks: Track[]
-  localSetups: LocalSetup[]
 }
 
 export interface UndoState {

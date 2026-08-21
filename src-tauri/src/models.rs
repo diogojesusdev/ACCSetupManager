@@ -31,7 +31,6 @@ pub enum RootStatus {
 pub struct LocalLibrary {
     pub cars: Vec<Car>,
     pub tracks: Vec<Track>,
-    pub local_setups: Vec<LocalSetup>,
 }
 
 #[derive(Debug, Clone, Serialize)]

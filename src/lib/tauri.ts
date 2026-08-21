@@ -14,6 +14,14 @@ export async function loadAppBootstrap(): Promise<AppBootstrap> {
   return invoke<AppBootstrap>('load_app_bootstrap')
 }
 
+export async function notifyFrontendReady(): Promise<void> {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+    return
+  }
+
+  await invoke('frontend_ready')
+}
+
 export async function setManualSetupRoot(path: string | null): Promise<AppBootstrap> {
   return invoke<AppBootstrap>('set_manual_setup_root', { path })
 }
@@ -106,6 +114,15 @@ export async function downloadRemoteSetup(args: {
   overwrite?: boolean
 }): Promise<MutationResult> {
   return invoke<MutationResult>('download_remote_setup', args)
+}
+
+export async function downloadRemoteSetupToTracks(args: {
+  sourceId: string
+  remoteSetupId: string
+  targetTrackPaths: string[]
+  targetFileName: string
+}): Promise<MutationResult> {
+  return invoke<MutationResult>('download_remote_setup_to_tracks', args)
 }
 
 export async function chooseDirectory(): Promise<string | null> {
