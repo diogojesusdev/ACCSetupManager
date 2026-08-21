@@ -93,7 +93,6 @@ export interface RemoteSetup {
   sourcePageUrl: string
   downloadUrl?: string
   updatedAt?: string
-  rankingLabel?: string
   author?: string
   previewAvailable: boolean
   sourceMetadata?: Record<string, unknown>

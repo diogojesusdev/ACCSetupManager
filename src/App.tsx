@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import {
   ActionIcon,
   Alert,
+  type ActionIconProps,
   AppShell,
   Badge,
   Box,
@@ -39,8 +40,7 @@ import {
   IconSettings,
   IconTrash,
 } from '@tabler/icons-react'
-import type { ReactNode } from 'react'
-import { Group as ResizableGroup, Panel, Separator } from 'react-resizable-panels'
+import type { MouseEventHandler, ReactNode } from 'react'
 import { clsx } from 'clsx'
 import {
   BUILT_IN_REMOTE_SOURCES,
@@ -69,7 +69,6 @@ import {
   sortLocalSetups,
   sortRemoteSetups,
   type LocalSortMode,
-  type RemoteSortMode,
 } from './lib/setup-list'
 import { useAppStore } from './state/app-store'
 import type { AppBootstrap, LocalSetup, MutationResult, RemoteSetup } from './types/models'
@@ -100,7 +99,7 @@ function showError(title: string, error: unknown): void {
 function showSuccess(message: string): void {
   notifications.show({
     message,
-    color: 'green',
+    color: 'steel',
   })
 }
 
@@ -116,10 +115,6 @@ function getRemoteSetupDescription(setup: RemoteSetup): string {
   const details = [sourceMetadata.setupType, sourceMetadata.weather]
     .filter((value): value is string => typeof value === 'string' && value.length > 0)
     .map((value) => value[0]?.toUpperCase() + value.slice(1))
-
-  if (setup.rankingLabel) {
-    details.unshift(setup.rankingLabel)
-  }
 
   if (details.length) {
     return details.join(' • ')
@@ -151,7 +146,6 @@ function App() {
     activeRemoteSourceId,
     selectedRemoteSetupIds,
     remoteFilters,
-    remoteSortModes,
     openDocument,
     setSelectedCarId,
     setSelectedTrackId,
@@ -161,7 +155,6 @@ function App() {
     setActiveRemoteSourceId,
     setSelectedRemoteSetupId,
     setRemoteFilter,
-    setRemoteSortMode,
     openDocumentPane,
     updateOpenDocumentContent,
     markOpenDocumentSaved,
@@ -193,9 +186,6 @@ function App() {
         localSortMode,
       ),
     [bootstrap?.library.localSetups, localFilter, localSortMode, selectedTrackId],
-  )
-  const selectedLocalSetup = visibleLocalSetups.find(
-    (setup) => setup.id === selectedLocalSetupId,
   )
   const activeRemoteSource =
     BUILT_IN_REMOTE_SOURCES.find((source) => source.id === activeRemoteSourceId) ??
@@ -549,6 +539,22 @@ function App() {
     }
   }
 
+  const openCreateSetupModal = () => {
+    if (!selectedTrack) {
+      return
+    }
+
+    setRenameModal({ mode: 'create', trackPath: selectedTrack.id, fileName: '' })
+  }
+
+  const openRenameSetupModal = (setup: LocalSetup) => {
+    setRenameModal({
+      mode: 'rename',
+      setup,
+      fileName: setup.fileName,
+    })
+  }
+
   if (bootstrapQuery.isLoading) {
     return (
       <Group justify="center" align="center" mih="100vh">
@@ -557,7 +563,7 @@ function App() {
     )
   }
 
-  function RemoteSetupList({
+  const renderRemoteSetupList = ({
     items,
     selectedSetupId,
     onSelect,
@@ -571,8 +577,7 @@ function App() {
     onOpenPreview: (setup: RemoteSetup) => void
     onDownload: (setup: RemoteSetup) => void
     onOpenSourcePage: (setup: RemoteSetup) => void
-  }) {
-    return (
+  }) => (
       <ScrollArea h="100%" type="auto" offsetScrollbars>
         <Stack gap="xs">
           {items.map((item) => {
@@ -584,24 +589,41 @@ function App() {
                 p="sm"
                 onClick={() => onSelect(item)}
                 onDoubleClick={() => onOpenPreview(item)}
-                style={{
-                  cursor: 'pointer',
-                  background: selected ? 'rgba(139, 92, 246, 0.2)' : 'rgba(30, 41, 59, 0.55)',
-                  border: selected
-                    ? '1px solid rgba(167, 139, 250, 0.7)'
-                    : '1px solid rgba(71, 85, 105, 0.45)',
+                tabIndex={0}
+                className={clsx('setup-row', selected && 'setup-row--selected')}
+                style={{ cursor: 'pointer' }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    onOpenPreview(item)
+                  }
+
+                  if (event.key === ' ') {
+                    event.preventDefault()
+                    onSelect(item)
+                  }
                 }}
               >
-                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <Group justify="space-between" align="flex-start" wrap="nowrap" gap="sm">
                   <Stack gap={4}>
-                    <Text fw={500}>{item.displayName}</Text>
+                    <Group gap="xs">
+                      <Text fw={600}>{item.displayName}</Text>
+                      {selected ? (
+                        <Badge size="xs" color="steel" variant="light">
+                          Selected
+                        </Badge>
+                      ) : null}
+                    </Group>
                     <Text size="sm" c="dimmed">
                       {getRemoteSetupDescription(item)}
                     </Text>
+                    <Text size="xs" c="dimmed">
+                      {item.updatedAt ? `Updated ${formatDate(item.updatedAt)}` : 'Preview and download available'}
+                    </Text>
                   </Stack>
-                  <Group gap={6} wrap="nowrap">
-                    <ActionIcon
-                      variant="subtle"
+                  <Group gap={4} wrap="nowrap" className="setup-row__actions">
+                    <IconActionButton
+                      label="Open source page"
                       color="gray"
                       onClick={(event) => {
                         event.stopPropagation()
@@ -609,27 +631,122 @@ function App() {
                       }}
                     >
                       <IconExternalLink size={16} />
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      color="blue"
+                    </IconActionButton>
+                    <IconActionButton
+                      label="Preview setup"
+                      color="steel"
                       onClick={(event) => {
                         event.stopPropagation()
                         onOpenPreview(item)
                       }}
                     >
                       <IconEdit size={16} />
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      color="green"
+                    </IconActionButton>
+                    <IconActionButton
+                      label="Download into selected track"
+                      color="steel"
                       onClick={(event) => {
                         event.stopPropagation()
                         onDownload(item)
                       }}
                     >
                       <IconDownload size={16} />
-                    </ActionIcon>
+                    </IconActionButton>
+                  </Group>
+                </Group>
+              </Paper>
+            )
+          })}
+        </Stack>
+      </ScrollArea>
+    )
+
+  const renderLocalSetupList = (items: LocalSetup[]) => {
+    if (!items.length) {
+      return (
+        <Group justify="center" align="center" h="100%">
+          <Stack gap={6} align="center">
+            <Text size="sm" fw={600}>
+              {selectedTrack ? 'No local setups yet' : 'Select a track to begin'}
+            </Text>
+            <Text size="sm" c="dimmed" ta="center" maw={280}>
+              {selectedTrack
+                ? 'Create a fresh JSON setup, import one from disk, or browse the remote library for ready-made baselines.'
+                : 'Pick a car and track first, then this compact library will show every local setup for that combination.'}
+            </Text>
+          </Stack>
+        </Group>
+      )
+    }
+
+    return (
+      <ScrollArea h="100%" type="auto" offsetScrollbars>
+        <Stack gap="xs">
+          {items.map((setup) => {
+            const selected = setup.id === selectedLocalSetupId
+            return (
+              <Paper
+                key={setup.id}
+                radius="md"
+                p="sm"
+                onClick={() => setSelectedLocalSetupId(setup.id)}
+                onDoubleClick={() => void openSetupInEditor(setup.id)}
+                tabIndex={0}
+                className={clsx('setup-row', selected && 'setup-row--selected')}
+                style={{ cursor: 'pointer' }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void openSetupInEditor(setup.id)
+                  }
+
+                  if (event.key === ' ') {
+                    event.preventDefault()
+                    setSelectedLocalSetupId(setup.id)
+                  }
+                }}
+              >
+                <Group justify="space-between" align="flex-start" wrap="nowrap" gap="sm">
+                  <Stack gap={4}>
+                    <Text fw={600}>{setup.displayName}</Text>
+                    <Text size="sm" c="dimmed">
+                      Saved {formatDate(setup.lastModifiedAt)}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {setup.fileName}
+                    </Text>
+                  </Stack>
+                  <Group gap={4} wrap="nowrap" className="setup-row__actions">
+                    <IconActionButton
+                      label="Open JSON panel"
+                      color="steel"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        void openSetupInEditor(setup.id)
+                      }}
+                    >
+                      <IconEdit size={16} />
+                    </IconActionButton>
+                    <IconActionButton
+                      label="Rename setup"
+                      color="gray"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        openRenameSetupModal(setup)
+                      }}
+                    >
+                      <IconEdit size={16} />
+                    </IconActionButton>
+                    <IconActionButton
+                      label="Delete setup"
+                      color="red"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setDeleteCandidate(setup)
+                      }}
+                    >
+                      <IconTrash size={16} />
+                    </IconActionButton>
                   </Group>
                 </Group>
               </Paper>
@@ -653,10 +770,8 @@ function App() {
   }
 
   const remoteFilter = remoteFilters[activeRemoteSource.id] ?? ''
-  const remoteSortMode = remoteSortModes[activeRemoteSource.id] ?? 'alphabetical'
   const visibleRemoteItems = sortRemoteSetups(
     filterRemoteSetups(remoteQuery.data?.items ?? [], remoteFilter),
-    remoteSortMode,
   )
   const selectedRemoteSetup =
     visibleRemoteItems.find((setup) => setup.id === selectedRemoteSetupId) ??
@@ -668,58 +783,69 @@ function App() {
         header={{ height: 72 }}
         padding={0}
         styles={{
+          header: {
+            background: 'rgba(7, 10, 18, 0.82)',
+            backdropFilter: 'blur(20px)',
+            borderBottom: '1px solid rgba(167, 175, 182, 0.14)',
+          },
           main: {
             background:
-              'linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(10, 12, 20, 1) 100%)',
+              'radial-gradient(circle at top, rgba(123, 20, 33, 0.16), transparent 32%), linear-gradient(180deg, rgba(18, 20, 24, 0.98) 0%, rgba(4, 5, 7, 1) 100%)',
             color: 'white',
           },
         }}
       >
         <AppShell.Header p="md">
-          <Group justify="space-between" align="center" h="100%">
-            <Stack gap={2}>
-              <Group gap="xs">
+          <Group justify="space-between" align="center" h="100%" wrap="nowrap">
+            <Stack gap={4} style={{ minWidth: 0 }}>
+              <Group gap="xs" wrap="nowrap">
                 <Text fw={700} size="lg">
                   ACC Setup Manager
                 </Text>
-                <Badge variant="light" color="violet">
-                  Windows v1
+                <Badge variant="light" color="steel">
+                  Compact desktop
                 </Badge>
               </Group>
-              <Group gap="xs">
-                <Text c="dimmed" size="sm">
-                  Root:
-                </Text>
-                <Code>
+              <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                <Badge
+                  variant="dot"
+                  color={bootstrap.settings.rootStatus === 'ready' ? 'steel' : 'yellow'}
+                >
+                  {bootstrap.settings.rootStatus === 'ready' ? 'Library ready' : 'Root needs attention'}
+                </Badge>
+                <Code className="root-pill">
                   {bootstrap.settings.effectiveRoot ?? 'No active setups folder selected'}
                 </Code>
               </Group>
             </Stack>
 
-            <Group gap="xs">
-              <Tooltip label={bootstrap.undoState.undoLabel ?? 'Nothing to undo'}>
-                <ActionIcon
-                  variant="light"
-                  size="lg"
-                  disabled={!bootstrap.undoState.canUndo || undoMutation.isPending}
-                  onClick={() => void undoMutation.mutateAsync()}
-                >
-                  <IconArrowBackUp size={18} />
-                </ActionIcon>
-              </Tooltip>
-              <Tooltip label={bootstrap.undoState.redoLabel ?? 'Nothing to redo'}>
-                <ActionIcon
-                  variant="light"
-                  size="lg"
-                  disabled={!bootstrap.undoState.canRedo || redoMutation.isPending}
-                  onClick={() => void redoMutation.mutateAsync()}
-                >
-                  <IconArrowForwardUp size={18} />
-                </ActionIcon>
-              </Tooltip>
-              <ActionIcon variant="light" size="lg" onClick={() => setSettingsOpened(true)}>
+            <Group gap="xs" wrap="nowrap">
+              <IconActionButton
+                label={bootstrap.undoState.undoLabel ?? 'Nothing to undo'}
+                variant="light"
+                size="lg"
+                disabled={!bootstrap.undoState.canUndo || undoMutation.isPending}
+                onClick={() => void undoMutation.mutateAsync()}
+              >
+                <IconArrowBackUp size={18} />
+              </IconActionButton>
+              <IconActionButton
+                label={bootstrap.undoState.redoLabel ?? 'Nothing to redo'}
+                variant="light"
+                size="lg"
+                disabled={!bootstrap.undoState.canRedo || redoMutation.isPending}
+                onClick={() => void redoMutation.mutateAsync()}
+              >
+                <IconArrowForwardUp size={18} />
+              </IconActionButton>
+              <IconActionButton
+                label="Open settings"
+                variant="light"
+                size="lg"
+                onClick={() => setSettingsOpened(true)}
+              >
                 <IconSettings size={18} />
-              </ActionIcon>
+              </IconActionButton>
             </Group>
           </Group>
         </AppShell.Header>
@@ -743,118 +869,121 @@ function App() {
                     <Code>C:\Users\&lt;user&gt;\Documents\Assetto Corsa Competizione\Setups</Code>
                     . Choose the folder manually to start browsing setups.
                   </Text>
-                  <Button leftSection={<IconFolderOpen size={16} />} onClick={() => void handlePickRoot()}>
+                  <Button
+                    leftSection={<IconFolderOpen size={16} />}
+                    onClick={() => void handlePickRoot()}
+                    title="Choose the ACC setups folder manually"
+                  >
                     Choose folder
                   </Button>
                 </Group>
               </Alert>
             ) : null}
 
-            <ResizableGroup orientation="horizontal" style={{ flex: 1, minHeight: 0 }}>
-              <Panel defaultSize={16} minSize={12}>
-                <ExplorerColumn
-                  title="Cars"
-                  subtitle={`${bootstrap.library.cars.length} folders`}
-                >
-                  <SelectableList
-                    items={bootstrap.library.cars.map((car) => ({
-                      id: car.id,
-                      title: car.displayName,
-                      description: `${car.trackCount} tracks`,
-                      selected: car.id === selectedCarId,
-                      onClick: () => {
-                        setSelectedCarId(car.id)
-                        setSelectedTrackId(null)
-                        setSelectedLocalSetupId(null)
-                      },
-                    }))}
-                  />
-                </ExplorerColumn>
-              </Panel>
-
-              <Separator style={resizeHandleStyle} />
-
-              <Panel defaultSize={18} minSize={14}>
-                <ExplorerColumn
-                  title="Tracks"
-                  subtitle={selectedCar ? `${visibleTracks.length} folders` : 'Select a car'}
-                >
-                  <SelectableList
-                    emptyMessage={
-                      selectedCar
-                        ? 'No track folders were found for this car.'
-                        : 'Select a car to view tracks.'
-                    }
-                    items={visibleTracks.map((track) => ({
-                      id: track.id,
-                      title: track.displayName,
-                      description: `${track.setupCount} setups`,
-                      selected: track.id === selectedTrackId,
-                      onClick: () => {
-                        setSelectedTrackId(track.id)
-                        setSelectedLocalSetupId(null)
-                      },
-                    }))}
-                  />
-                </ExplorerColumn>
-              </Panel>
-
-              <Separator style={resizeHandleStyle} />
-
-              <Panel defaultSize={26} minSize={18}>
-                <ExplorerColumn
-                  title="Local setups"
-                  subtitle={selectedTrack ? `${visibleLocalSetups.length} items` : 'Select a track'}
-                  toolbar={
-                    <Group gap="xs" wrap="nowrap">
-                      <ActionIcon
-                        variant="light"
-                        disabled={!selectedTrack}
-                        onClick={() =>
-                          setRenameModal(
-                            selectedTrack
-                              ? { mode: 'create', trackPath: selectedTrack.id, fileName: '' }
-                              : null,
-                          )
-                        }
-                      >
-                        <IconPlus size={16} />
-                      </ActionIcon>
-                      <ActionIcon
-                        variant="light"
-                        disabled={!selectedLocalSetup}
-                        onClick={() =>
-                          setRenameModal(
-                            selectedLocalSetup
-                              ? {
-                                  mode: 'rename',
-                                  setup: selectedLocalSetup,
-                                  fileName: selectedLocalSetup.fileName,
-                                }
-                              : null,
-                          )
-                        }
-                      >
-                        <IconEdit size={16} />
-                      </ActionIcon>
-                      <ActionIcon
-                        variant="light"
-                        color="red"
-                        disabled={!selectedLocalSetup}
-                        onClick={() => setDeleteCandidate(selectedLocalSetup ?? null)}
-                      >
-                        <IconTrash size={16} />
-                      </ActionIcon>
-                      <ActionIcon variant="light" disabled={!selectedTrack} onClick={() => void handleImportClick()}>
-                        <IconDownload size={16} />
-                      </ActionIcon>
+            <Box className="workspace-grid">
+              <Card withBorder radius="xl" className="surface-card">
+                <Stack gap="lg" h="100%">
+                  <Stack gap={4}>
+                    <Group justify="space-between" align="flex-start">
+                      <div>
+                        <Text fw={700}>Setup library</Text>
+                        <Text size="sm" c="dimmed">
+                          Pick a car, narrow to a track, then manage local setups. JSON opens only when needed.
+                        </Text>
+                      </div>
+                      <Badge variant="light" color="steel">
+                        {bootstrap.library.localSetups.length} total setups
+                      </Badge>
                     </Group>
-                  }
-                >
-                  <Stack gap="sm" h="100%">
+                    <Box className="context-strip">
+                      <Group gap="xs" wrap="wrap">
+                        <Badge variant="light" color="dark">
+                          {bootstrap.library.cars.length} cars
+                        </Badge>
+                        <Badge variant="light" color="dark">
+                          {visibleTracks.length} tracks
+                        </Badge>
+                        <Badge variant="light" color="steel">
+                          {visibleLocalSetups.length} visible
+                        </Badge>
+                      </Group>
+                    </Box>
+                  </Stack>
+
+                  <Box className="selection-grid">
+                    <Stack gap={6}>
+                      <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+                        Car
+                      </Text>
+                      <NativeSelect
+                        value={selectedCarId ?? ''}
+                        onChange={(event) => {
+                          setSelectedCarId(event.currentTarget.value || null)
+                          setSelectedTrackId(null)
+                          setSelectedLocalSetupId(null)
+                        }}
+                        data={bootstrap.library.cars.map((car) => ({
+                          value: car.id,
+                          label: `${car.displayName} (${car.trackCount})`,
+                        }))}
+                      />
+                    </Stack>
+                    <Stack gap={6}>
+                      <Text size="xs" tt="uppercase" fw={700} c="dimmed">
+                        Track
+                      </Text>
+                      <NativeSelect
+                        value={selectedTrackId ?? ''}
+                        disabled={!selectedCar}
+                        onChange={(event) => {
+                          setSelectedTrackId(event.currentTarget.value || null)
+                          setSelectedLocalSetupId(null)
+                        }}
+                        data={
+                          visibleTracks.length
+                            ? visibleTracks.map((track) => ({
+                                value: track.id,
+                                label: `${track.displayName} (${track.setupCount})`,
+                              }))
+                            : [{ value: '', label: selectedCar ? 'No tracks found' : 'Select a car first' }]
+                        }
+                      />
+                    </Stack>
+                  </Box>
+
+                  <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
+                    <Group justify="space-between" align="flex-start">
+                      <div>
+                        <Text fw={700}>Local setups</Text>
+                        <Text size="sm" c="dimmed">
+                          {selectedTrack
+                            ? `${selectedTrack.displayName} for ${selectedCar?.displayName ?? 'selected car'}`
+                            : 'Select a track to unlock create and import actions.'}
+                        </Text>
+                      </div>
+                      <Group gap={4} wrap="nowrap">
+                        <IconActionButton
+                          label="Create a new setup"
+                          color="steel"
+                          disabled={!selectedTrack}
+                          onClick={openCreateSetupModal}
+                        >
+                          <IconPlus size={16} />
+                        </IconActionButton>
+                        <IconActionButton
+                          label="Import a JSON setup"
+                          color="steel"
+                          disabled={!selectedTrack}
+                          onClick={() => void handleImportClick()}
+                        >
+                          <IconDownload size={16} />
+                        </IconActionButton>
+                      </Group>
+                    </Group>
+
                     <Group grow>
                       <TextInput
-                        placeholder="Filter setups"
+                        placeholder="Search local setups"
                         value={localFilter}
                         onChange={(event) => setLocalFilter(event.currentTarget.value)}
                       />
@@ -869,271 +998,287 @@ function App() {
                         ]}
                       />
                     </Group>
-                    <Paper
-                      h="100%"
-                      p="xs"
-                      bg="dark.6"
-                      radius="md"
+
+                    <Box
+                      className="list-shell"
                       onDragOver={(event) => event.preventDefault()}
                       onDrop={(event) => void handleDropImport(event)}
                     >
-                      <SelectableList
-                        emptyMessage={
-                          selectedTrack
-                            ? 'No setup files were found for this track. Create or import one to begin.'
-                            : 'Select a track to browse local setups.'
-                        }
-                        items={visibleLocalSetups.map((setup) => ({
-                          id: setup.id,
-                          title: setup.displayName,
-                          description: `Saved ${formatDate(setup.lastModifiedAt)}`,
-                          selected: setup.id === selectedLocalSetupId,
-                          onClick: () => setSelectedLocalSetupId(setup.id),
-                          onDoubleClick: () => void openSetupInEditor(setup.id),
-                        }))}
-                      />
-                    </Paper>
+                      {renderLocalSetupList(visibleLocalSetups)}
+                    </Box>
+
                     <Text size="xs" c="dimmed">
                       Drop a JSON file here to import it into the selected track folder.
                     </Text>
                   </Stack>
-                </ExplorerColumn>
-              </Panel>
+                </Stack>
+              </Card>
 
-              <Separator style={resizeHandleStyle} />
-
-              <Panel defaultSize={40} minSize={24}>
-                {openDocument ? (
-                  <Stack gap="sm" h="100%">
-                    <Group justify="space-between">
-                      <Stack gap={2}>
-                        <Text fw={600}>{openDocument.title}</Text>
-                        <Text size="sm" c="dimmed">
-                          {openDocument.readOnly ? 'Read-only preview' : 'Editable local JSON'}
-                        </Text>
-                      </Stack>
-                      <Group gap="xs">
-                        {openDocument.remoteDownload ? (
-                          <Button
-                            variant="light"
-                            leftSection={<IconDownload size={16} />}
-                            loading={remoteDownloadMutation.isPending}
-                            onClick={() => void requestPreviewDownload()}
-                          >
-                            Download
-                          </Button>
-                        ) : null}
-                        {openDocument.remoteDownload?.sourcePageUrl ? (
-                          <ActionIcon
-                            variant="light"
-                            size="lg"
-                            onClick={() =>
-                              void openExternal(openDocument.remoteDownload?.sourcePageUrl ?? '')
-                            }
-                          >
-                            <IconExternalLink size={16} />
-                          </ActionIcon>
-                        ) : null}
-                        {!openDocument.readOnly ? (
-                          <Button
-                            leftSection={<IconRefresh size={16} />}
-                            disabled={!openDocument.dirty || saveMutation.isPending}
-                            onClick={() =>
-                              void saveMutation.mutateAsync({
-                                path: openDocument.id,
-                                content: openDocument.content,
-                              })
-                            }
-                          >
-                            Save
-                          </Button>
-                        ) : null}
-                        <Button variant="light" onClick={closeOpenDocument}>
-                          Close
+              <Card withBorder radius="xl" className="surface-card">
+                <Stack gap="md" h="100%">
+                  <Group justify="space-between" align="flex-start" wrap="wrap">
+                    <div>
+                      <Text fw={700}>Remote setup library</Text>
+                      <Text size="sm" c="dimmed">
+                        {selectedTrack
+                          ? `Browse proven setups for ${selectedCar?.displayName ?? 'the selected car'} at ${selectedTrack.displayName}.`
+                          : 'Choose a car and track on the left, then browse remote setups here.'}
+                      </Text>
+                    </div>
+                    <Group gap="xs" wrap="wrap">
+                      {openDocument ? (
+                        <Badge variant="light" color="steel">
+                          JSON panel open
+                        </Badge>
+                      ) : (
+                        <Badge variant="light" color="dark">
+                          JSON on demand
+                        </Badge>
+                      )}
+                      {openDocument ? (
+                        <Button
+                          variant="light"
+                          onClick={closeOpenDocument}
+                          title="Close the current JSON panel"
+                        >
+                          Close JSON panel
                         </Button>
-                      </Group>
+                      ) : null}
                     </Group>
-                    <Card withBorder radius="lg" bg="dark.7" h="100%" p="xs">
-                      <Suspense
-                        fallback={
-                          <Group justify="center" align="center" h="100%">
-                            <Loader size="sm" />
-                          </Group>
-                        }
-                      >
-                        <MonacoEditor
-                          language="json"
-                          theme="vs-dark"
-                          value={openDocument.content}
-                          options={{
-                            minimap: { enabled: false },
-                            automaticLayout: true,
-                            readOnly: openDocument.readOnly,
-                            scrollBeyondLastLine: false,
-                            formatOnPaste: true,
-                            formatOnType: true,
-                          }}
-                          onChange={(value) => {
-                            if (!openDocument.readOnly) {
-                              updateOpenDocumentContent(value ?? '')
-                            }
-                          }}
-                        />
-                      </Suspense>
-                    </Card>
-                  </Stack>
-                ) : (
-                  <Stack gap="md" h="100%">
-                    <Group justify="space-between">
-                      <Stack gap={2}>
-                        <Text fw={600}>Remote source area</Text>
+                  </Group>
+
+                  <Tabs
+                    value={activeRemoteSource.id}
+                    onChange={(value) => value && setActiveRemoteSourceId(value)}
+                    variant="outline"
+                    radius="md"
+                    styles={{
+                      root: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 },
+                      panel: { flex: 1, display: 'flex', minHeight: 0 },
+                    }}
+                  >
+                    <Group justify="space-between" align="flex-start" wrap="wrap" mb="sm">
+                      <div>
+                        <Text fw={700}>Compare and import</Text>
                         <Text size="sm" c="dimmed">
-                          Simply Lovely Setups is live. The other tabs reflect the completed
-                          verification report.
+                          Preview or download remote setups without giving JSON editing permanent space in the main view.
                         </Text>
-                      </Stack>
+                      </div>
                       <Button
                         variant="light"
                         leftSection={<IconRefresh size={16} />}
                         disabled={!selectedTrack}
                         loading={refreshRemoteMutation.isPending}
                         onClick={() => void refreshRemoteMutation.mutateAsync()}
+                        title="Refresh the active remote source"
                       >
                         Refresh
                       </Button>
                     </Group>
 
-                    <Tabs
-                      value={activeRemoteSource.id}
-                      onChange={(value) => value && setActiveRemoteSourceId(value)}
-                      variant="outline"
-                      radius="md"
-                      styles={{ panel: { flex: 1, display: 'flex', minHeight: 0 } }}
-                    >
-                      <Tabs.List>
-                        {BUILT_IN_REMOTE_SOURCES.map((source) => (
-                          <Tabs.Tab key={source.id} value={source.id}>
-                            {source.name}
-                          </Tabs.Tab>
-                        ))}
-                      </Tabs.List>
-
+                    <Tabs.List>
                       {BUILT_IN_REMOTE_SOURCES.map((source) => (
-                        <Tabs.Panel key={source.id} value={source.id} pt="md">
-                          <Stack gap="sm" h="100%">
-                            <Card withBorder radius="lg" bg="dark.7">
-                              <Group justify="space-between" align="flex-start">
-                                <Stack gap={4}>
-                                  <Group gap="xs">
-                                    <Text fw={600}>{source.name}</Text>
-                                    {source.id === 'simply-lovely-setups' ? (
-                                      <Badge color="green" variant="light">
-                                        Live
-                                      </Badge>
-                                    ) : (
-                                      <Badge color="gray" variant="light">
-                                        Deferred
-                                      </Badge>
-                                    )}
-                                    {source.id === activeRemoteSource.id && remoteQuery.data?.stale ? (
-                                      <Badge color="yellow" variant="light">
-                                        Cached
-                                      </Badge>
-                                    ) : null}
-                                  </Group>
-                                  <Text size="sm" c="dimmed">
-                                    {source.summary}
-                                  </Text>
-                                </Stack>
-                                <Button
-                                  variant="subtle"
-                                  rightSection={<IconExternalLink size={14} />}
-                                  onClick={() => void openExternal(source.baseUrl)}
-                                >
-                                  Open source page
-                                </Button>
-                              </Group>
-                            </Card>
-
-                            <Group grow>
-                              <TextInput
-                                placeholder="Filter remote setups"
-                                value={remoteFilters[source.id] ?? ''}
-                                onChange={(event) =>
-                                  setRemoteFilter(source.id, event.currentTarget.value)
-                                }
-                              />
-                              <SegmentedControl
-                                value={remoteSortModes[source.id] ?? 'alphabetical'}
-                                onChange={(value) =>
-                                  setRemoteSortMode(source.id, value as RemoteSortMode)
-                                }
-                                data={[
-                                  { value: 'alphabetical', label: 'Alphabetical' },
-                                  { value: 'ranking', label: 'Ranking' },
-                                ]}
-                              />
-                            </Group>
-
-                            <Card withBorder radius="lg" bg="dark.6" h="100%">
-                              {source.id !== activeRemoteSource.id ? (
-                                <Group justify="center" align="center" h="100%">
-                                  <Text size="sm" c="dimmed">
-                                    Switch to this tab to load its current state.
-                                  </Text>
-                                </Group>
-                              ) : remoteQuery.isFetching ? (
-                                <Group justify="center" align="center" h="100%">
-                                  <Loader size="sm" />
-                                </Group>
-                              ) : remoteQuery.isError ? (
-                                <Group justify="center" align="center" h="100%">
-                                  <Alert color="red" title="Remote source request failed">
-                                    {remoteQuery.error instanceof Error
-                                      ? remoteQuery.error.message
-                                      : 'The remote source request failed.'}
-                                  </Alert>
-                                </Group>
-                              ) : visibleRemoteItems.length ? (
-                                <RemoteSetupList
-                                  items={visibleRemoteItems}
-                                  selectedSetupId={selectedRemoteSetup?.id ?? null}
-                                  onSelect={(setup) => setSelectedRemoteSetupId(source.id, setup.id)}
-                                  onOpenPreview={(setup) => void openRemotePreview(setup)}
-                                  onDownload={(setup) => void requestRemoteDownload(setup)}
-                                  onOpenSourcePage={(setup) => void openExternal(setup.sourcePageUrl)}
-                                />
-                              ) : (
-                                <Stack gap="sm" justify="center" h="100%">
-                                  <Group gap="xs">
-                                    <ThemeIcon color="gray" variant="light">
-                                      <IconCloudOff size={16} />
-                                    </ThemeIcon>
-                                    <Text fw={500}>
-                                      {source.id === activeRemoteSource.id
-                                        ? remoteQuery.data?.message
-                                        : 'Switch to this tab to load its current state.'}
-                                    </Text>
-                                  </Group>
-                                  <Text size="sm" c="dimmed">
-                                    {source.id === 'simply-lovely-setups'
-                                      ? 'The adapter is live. If no entries appear, the selected car and track may not be covered by the verified API.'
-                                      : 'The tab is preserved in the built-in source allowlist, but the verification report recommends deferring this source for v1.'}
-                                  </Text>
-                                </Stack>
-                              )}
-                            </Card>
-                          </Stack>
-                        </Tabs.Panel>
+                        <Tabs.Tab key={source.id} value={source.id}>
+                          {source.name}
+                        </Tabs.Tab>
                       ))}
-                    </Tabs>
-                  </Stack>
-                )}
-              </Panel>
-            </ResizableGroup>
+                    </Tabs.List>
+
+                    {BUILT_IN_REMOTE_SOURCES.map((source) => (
+                      <Tabs.Panel key={source.id} value={source.id} pt="md">
+                        <Stack gap="sm" h="100%" style={{ flex: 1, minHeight: 0 }}>
+                          <Card withBorder radius="xl" className="context-strip">
+                            <Group justify="space-between" align="flex-start" wrap="wrap">
+                              <Stack gap={4}>
+                                <Group gap="xs" wrap="wrap">
+                                  <Text fw={600}>{source.name}</Text>
+                                  <Badge color="steel" variant="light">
+                                    Live
+                                  </Badge>
+                                  {source.id === activeRemoteSource.id && remoteQuery.data?.stale ? (
+                                    <Badge color="yellow" variant="light">
+                                      Cached
+                                    </Badge>
+                                  ) : null}
+                                </Group>
+                                <Text size="sm" c="dimmed">
+                                  {source.summary}
+                                </Text>
+                              </Stack>
+                              <Button
+                                variant="subtle"
+                                rightSection={<IconExternalLink size={14} />}
+                                onClick={() => void openExternal(source.baseUrl)}
+                                title="Open the source website in your browser"
+                              >
+                                Open source page
+                              </Button>
+                            </Group>
+                          </Card>
+
+                          <TextInput
+                            placeholder="Search remote setups"
+                            value={remoteFilters[source.id] ?? ''}
+                            onChange={(event) =>
+                              setRemoteFilter(source.id, event.currentTarget.value)
+                            }
+                          />
+
+                          <Box className="list-shell">
+                            {source.id !== activeRemoteSource.id ? (
+                              <Group justify="center" align="center" h="100%">
+                                <Text size="sm" c="dimmed">
+                                  Switch to this source to load its current state.
+                                </Text>
+                              </Group>
+                            ) : remoteQuery.isFetching ? (
+                              <Group justify="center" align="center" h="100%">
+                                <Loader size="sm" />
+                              </Group>
+                            ) : remoteQuery.isError ? (
+                              <Group justify="center" align="center" h="100%">
+                                <Alert color="red" title="Remote source request failed">
+                                  {remoteQuery.error instanceof Error
+                                    ? remoteQuery.error.message
+                                    : 'The remote source request failed.'}
+                                </Alert>
+                              </Group>
+                            ) : visibleRemoteItems.length ? (
+                              renderRemoteSetupList({
+                                items: visibleRemoteItems,
+                                selectedSetupId: selectedRemoteSetup?.id ?? null,
+                                onSelect: (setup) => setSelectedRemoteSetupId(source.id, setup.id),
+                                onOpenPreview: (setup) => void openRemotePreview(setup),
+                                onDownload: (setup) => void requestRemoteDownload(setup),
+                                onOpenSourcePage: (setup) => void openExternal(setup.sourcePageUrl),
+                              })
+                            ) : (
+                              <Stack gap="sm" justify="center" h="100%">
+                                <Group gap="xs">
+                                  <ThemeIcon color="gray" variant="light">
+                                    <IconCloudOff size={16} />
+                                  </ThemeIcon>
+                                  <Text fw={500}>
+                                    {source.id === activeRemoteSource.id
+                                      ? remoteQuery.data?.message
+                                      : 'Switch to this source to load its current state.'}
+                                  </Text>
+                                </Group>
+                                <Text size="sm" c="dimmed">
+                                  If no entries appear, the selected car and track may not be covered by this adapter yet.
+                                </Text>
+                              </Stack>
+                            )}
+                          </Box>
+                        </Stack>
+                      </Tabs.Panel>
+                    ))}
+                  </Tabs>
+                </Stack>
+              </Card>
+            </Box>
           </Stack>
         </AppShell.Main>
       </AppShell>
+
+      <Modal
+        opened={Boolean(openDocument)}
+        onClose={closeOpenDocument}
+        title={
+          openDocument ? (
+            <Group gap="xs" wrap="wrap">
+              <Text fw={700}>{openDocument.title}</Text>
+              <Badge variant="light" color={openDocument.readOnly ? 'dark' : 'steel'}>
+                {openDocument.readOnly ? 'Read-only preview' : 'Editable JSON'}
+              </Badge>
+              <Badge variant="light" color={openDocument.dirty ? 'red' : 'steel'}>
+                {openDocument.dirty ? 'Unsaved changes' : 'Saved'}
+              </Badge>
+            </Group>
+          ) : null
+        }
+        size="82%"
+        centered
+      >
+        {openDocument ? (
+          <Stack gap="sm">
+            <Group justify="space-between" align="flex-start" wrap="wrap">
+              <Text size="sm" c="dimmed">
+                {openDocument.sourceLabel}
+              </Text>
+              <Group gap="xs" wrap="wrap">
+                {openDocument.remoteDownload ? (
+                  <Button
+                    variant="light"
+                    leftSection={<IconDownload size={16} />}
+                    loading={remoteDownloadMutation.isPending}
+                    onClick={() => void requestPreviewDownload()}
+                    title="Download this preview into the selected local track folder"
+                  >
+                    Download
+                  </Button>
+                ) : null}
+                {openDocument.remoteDownload?.sourcePageUrl ? (
+                  <IconActionButton
+                    label="Open source page"
+                    variant="light"
+                    size="lg"
+                    onClick={() =>
+                      void openExternal(openDocument.remoteDownload?.sourcePageUrl ?? '')
+                    }
+                  >
+                    <IconExternalLink size={16} />
+                  </IconActionButton>
+                ) : null}
+                {!openDocument.readOnly ? (
+                  <Button
+                    leftSection={<IconRefresh size={16} />}
+                    disabled={!openDocument.dirty || saveMutation.isPending}
+                    onClick={() =>
+                      void saveMutation.mutateAsync({
+                        path: openDocument.id,
+                        content: openDocument.content,
+                      })
+                    }
+                    title="Save the current setup file"
+                  >
+                    Save
+                  </Button>
+                ) : null}
+              </Group>
+            </Group>
+            <Card withBorder radius="xl" className="editor-shell editor-modal-shell" p="xs">
+              <Suspense
+                fallback={
+                  <Group justify="center" align="center" h="100%">
+                    <Loader size="sm" />
+                  </Group>
+                }
+              >
+                <MonacoEditor
+                  height="100%"
+                  language="json"
+                  theme="vs-dark"
+                  value={openDocument.content}
+                  options={{
+                    minimap: { enabled: false },
+                    automaticLayout: true,
+                    readOnly: openDocument.readOnly,
+                    scrollBeyondLastLine: false,
+                    formatOnPaste: true,
+                    formatOnType: true,
+                  }}
+                  onChange={(value) => {
+                    if (!openDocument.readOnly) {
+                      updateOpenDocumentContent(value ?? '')
+                    }
+                  }}
+                />
+              </Suspense>
+            </Card>
+          </Stack>
+        ) : null}
+      </Modal>
 
       <Modal
         opened={Boolean(renameModal)}
@@ -1334,98 +1479,30 @@ function App() {
   )
 }
 
-interface SelectableListItem {
-  id: string
-  title: string
-  description: string
-  selected: boolean
-  onClick?: () => void
-  onDoubleClick?: () => void
-}
-
-function ExplorerColumn({
-  title,
-  subtitle,
-  toolbar,
+function IconActionButton({
+  label,
   children,
+  variant = 'subtle',
+  ...props
 }: {
-  title: string
-  subtitle: string
-  toolbar?: ReactNode
+  label: string
   children: ReactNode
+  color?: string
+  disabled?: boolean
+  loading?: boolean
+  onClick?: MouseEventHandler<HTMLButtonElement>
+  size?: ActionIconProps['size']
+  variant?: ActionIconProps['variant']
 }) {
   return (
-    <Card
-      withBorder
-      radius="lg"
-      bg="rgba(13, 17, 28, 0.85)"
-      h="100%"
-      styles={{ root: { display: 'flex', flexDirection: 'column', minHeight: 0 } }}
-    >
-      <Group justify="space-between" align="flex-start" mb="md">
-        <Stack gap={2}>
-          <Text fw={600}>{title}</Text>
-          <Text size="sm" c="dimmed">
-            {subtitle}
-          </Text>
-        </Stack>
-        {toolbar}
-      </Group>
-      <Box style={{ flex: 1, minHeight: 0 }}>{children}</Box>
-    </Card>
+    <Tooltip label={label} withArrow openDelay={150}>
+      <Box component="span" style={{ display: 'inline-flex' }}>
+        <ActionIcon aria-label={label} variant={variant} {...props}>
+          {children}
+        </ActionIcon>
+      </Box>
+    </Tooltip>
   )
-}
-
-function SelectableList({
-  items,
-  emptyMessage = 'Nothing to show.',
-}: {
-  items: SelectableListItem[]
-  emptyMessage?: string
-}) {
-  if (!items.length) {
-    return (
-      <Group justify="center" align="center" h="100%">
-        <Text size="sm" c="dimmed" ta="center">
-          {emptyMessage}
-        </Text>
-      </Group>
-    )
-  }
-
-  return (
-    <ScrollArea h="100%" type="auto" offsetScrollbars>
-      <Stack gap="xs">
-        {items.map((item) => (
-          <Paper
-            key={item.id}
-            radius="md"
-            p="sm"
-            onClick={item.onClick}
-            onDoubleClick={item.onDoubleClick}
-            className={clsx('selectable-list-item', item.selected && 'selectable-list-item--selected')}
-            style={{
-              cursor: item.onClick ? 'pointer' : 'default',
-              background: item.selected ? 'rgba(139, 92, 246, 0.2)' : 'rgba(30, 41, 59, 0.55)',
-              border: item.selected
-                ? '1px solid rgba(167, 139, 250, 0.7)'
-                : '1px solid rgba(71, 85, 105, 0.45)',
-            }}
-          >
-            <Text fw={500}>{item.title}</Text>
-            <Text size="sm" c="dimmed">
-              {item.description}
-            </Text>
-          </Paper>
-        ))}
-      </Stack>
-    </ScrollArea>
-  )
-}
-
-const resizeHandleStyle = {
-  width: 6,
-  background: 'transparent',
 }
 
 export default App

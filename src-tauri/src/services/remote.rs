@@ -588,7 +588,6 @@ fn normalize_remote_setup(item: SimplyLovelySetupListItem) -> RemoteSetup {
             item.id
         )),
         updated_at: None,
-        ranking_label: None,
         author: None,
         preview_available: true,
         source_metadata: Some(json!({
