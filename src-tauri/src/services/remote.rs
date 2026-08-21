@@ -30,7 +30,9 @@ pub fn load_remote_source_results(
     force_refresh: bool,
 ) -> AppResult<RemoteSourceResult> {
     if source_id != SIMPLY_LOVELY_SOURCE_ID {
-        return Err(AppError::from("This remote source is not implemented in the backend."));
+        return Err(AppError::from(
+            "This remote source is not implemented in the backend.",
+        ));
     }
 
     let client = SimplyLovelyClient::new(state)?;
@@ -120,7 +122,9 @@ pub fn read_remote_setup_document(
     remote_setup_id: &str,
 ) -> AppResult<SetupDocument> {
     if source_id != SIMPLY_LOVELY_SOURCE_ID {
-        return Err(AppError::from("Remote preview is not available for this source."));
+        return Err(AppError::from(
+            "Remote preview is not available for this source.",
+        ));
     }
 
     let detail = load_detail_with_cache(state, remote_setup_id)?;
@@ -160,14 +164,21 @@ pub fn download_remote_setup(
     overwrite: bool,
 ) -> AppResult<std::path::PathBuf> {
     if source_id != SIMPLY_LOVELY_SOURCE_ID {
-        return Err(AppError::from("Remote download is not available for this source."));
+        return Err(AppError::from(
+            "Remote download is not available for this source.",
+        ));
     }
 
     let detail = load_detail_with_cache(state, remote_setup_id)?;
     let preview_payload = transform_detail_for_download(&detail);
     let content = serde_json::to_string_pretty(&preview_payload)?;
-    let imported_path =
-        filesystem::write_setup_into_track(state, track_path, target_file_name, &content, overwrite)?;
+    let imported_path = filesystem::write_setup_into_track(
+        state,
+        track_path,
+        target_file_name,
+        &content,
+        overwrite,
+    )?;
 
     record_download_history(
         &state.db_path,
@@ -183,13 +194,66 @@ pub fn download_remote_setup(
     Ok(imported_path)
 }
 
-fn load_detail_with_cache(state: &AppState, remote_setup_id: &str) -> AppResult<SimplyLovelySetupDetail> {
+pub fn download_remote_setup_to_tracks(
+    state: &AppState,
+    source_id: &str,
+    remote_setup_id: &str,
+    target_track_paths: &[String],
+    target_file_name: &str,
+) -> AppResult<Vec<std::path::PathBuf>> {
+    if source_id != SIMPLY_LOVELY_SOURCE_ID {
+        return Err(AppError::from(
+            "Remote download is not available for this source.",
+        ));
+    }
+
+    if target_track_paths.is_empty() {
+        return Err(AppError::from("Select at least one destination track."));
+    }
+
+    let detail = load_detail_with_cache(state, remote_setup_id)?;
+    let preview_payload = transform_detail_for_download(&detail);
+    let content = serde_json::to_string_pretty(&preview_payload)?;
+    let mut imported_paths = Vec::new();
+
+    for track_path in target_track_paths {
+        let imported_path = filesystem::write_setup_into_track_with_unique_name(
+            state,
+            Path::new(track_path),
+            target_file_name,
+            &content,
+        )?;
+        record_download_history(
+            &state.db_path,
+            source_id,
+            &imported_path,
+            &json!({
+                "remoteSetupId": remote_setup_id,
+                "sourcePageUrl": simply_lovely_source_page_url(remote_setup_id),
+                "fileName": detail.file_name,
+            }),
+        )?;
+        imported_paths.push(imported_path);
+    }
+
+    Ok(imported_paths)
+}
+
+fn load_detail_with_cache(
+    state: &AppState,
+    remote_setup_id: &str,
+) -> AppResult<SimplyLovelySetupDetail> {
     let cached = read_preview_cache(&state.db_path, SIMPLY_LOVELY_SOURCE_ID, remote_setup_id)?;
     let client = SimplyLovelyClient::new(state)?;
 
     match client.fetch_detail(remote_setup_id) {
         Ok(detail) => {
-            write_preview_cache(&state.db_path, SIMPLY_LOVELY_SOURCE_ID, remote_setup_id, &detail)?;
+            write_preview_cache(
+                &state.db_path,
+                SIMPLY_LOVELY_SOURCE_ID,
+                remote_setup_id,
+                &detail,
+            )?;
             Ok(detail)
         }
         Err(error) => {
@@ -338,11 +402,7 @@ fn parse_rfc3339(value: &str) -> DateTime<Utc> {
 }
 
 fn json_to_sql_error(error: serde_json::Error) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        0,
-        rusqlite::types::Type::Text,
-        Box::new(error),
-    )
+    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }
 
 fn resolve_catalog_value(
@@ -363,7 +423,10 @@ fn resolve_catalog_value(
     }
 
     for candidate in &candidates {
-        if let Some(found) = catalog.iter().find(|value| value.eq_ignore_ascii_case(candidate)) {
+        if let Some(found) = catalog
+            .iter()
+            .find(|value| value.eq_ignore_ascii_case(candidate))
+        {
             return Some(found.clone());
         }
     }
@@ -477,10 +540,9 @@ impl<'a> SimplyLovelyClient<'a> {
     }
 
     fn fetch_detail(&self, remote_setup_id: &str) -> AppResult<SimplyLovelySetupDetail> {
-        let response: SimplyLovelyCollection<SimplyLovelySetupDetail> =
-            self.get_json(&format!(
-                "/api/v1/acc/setups/?object_id={remote_setup_id}&details=true"
-            ))?;
+        let response: SimplyLovelyCollection<SimplyLovelySetupDetail> = self.get_json(&format!(
+            "/api/v1/acc/setups/?object_id={remote_setup_id}&details=true"
+        ))?;
         response
             .items
             .into_iter()
@@ -492,7 +554,9 @@ impl<'a> SimplyLovelyClient<'a> {
         let api_key = self.resolve_api_key(false)?;
         match self.get_json_with_api_key(path, &api_key) {
             Ok(value) => Ok(value),
-            Err(AppError::Http(error)) if error.status() == Some(reqwest::StatusCode::UNAUTHORIZED) => {
+            Err(AppError::Http(error))
+                if error.status() == Some(reqwest::StatusCode::UNAUTHORIZED) =>
+            {
                 let refreshed_api_key = self.resolve_api_key(true)?;
                 self.get_json_with_api_key(path, &refreshed_api_key)
             }
@@ -509,8 +573,9 @@ impl<'a> SimplyLovelyClient<'a> {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             "X-API-Key",
-            HeaderValue::from_str(api_key)
-                .map_err(|_| AppError::from("The discovered Simply Lovely Setups API key was invalid."))?,
+            HeaderValue::from_str(api_key).map_err(|_| {
+                AppError::from("The discovered Simply Lovely Setups API key was invalid.")
+            })?,
         );
 
         let response = self
@@ -574,7 +639,9 @@ fn normalize_remote_setup(item: SimplyLovelySetupListItem) -> RemoteSetup {
         .file_name
         .clone()
         .unwrap_or_else(|| format!("{}-{}.json", item.track_name, item.car_name));
-    let file_stem = file_name.strip_suffix(".json").unwrap_or(file_name.as_str());
+    let file_stem = file_name
+        .strip_suffix(".json")
+        .unwrap_or(file_name.as_str());
 
     RemoteSetup {
         id: item.id.clone(),

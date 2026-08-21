@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use std::{collections::BTreeSet, ffi::OsString};
 
 use chrono::{DateTime, Utc};
 
@@ -59,7 +60,13 @@ pub fn read_setup_document(state: &AppState, path: &Path) -> AppResult<SetupDocu
 }
 
 pub fn load_local_setups(state: &AppState, track_path: &Path) -> AppResult<Vec<LocalSetup>> {
-    let track_path = validate_existing_track_path(state, track_path)?;
+    let track_path = resolve_track_path(state, track_path)?;
+    if !track_path.exists() {
+        return Ok(Vec::new());
+    }
+    if !track_path.is_dir() {
+        return Err(AppError::from("The selected track path is not a folder."));
+    }
     scan_track_setups(&track_path)
 }
 
@@ -75,12 +82,14 @@ pub fn create_local_setup(
     track_path: &Path,
     file_name: &str,
 ) -> AppResult<PathBuf> {
-    let track_path = validate_existing_track_path(state, track_path)?;
+    let track_path = ensure_track_folder(state, track_path)?;
     let sanitized_name = sanitize_file_name(file_name)?;
     let new_path = track_path.join(sanitized_name);
 
     if new_path.exists() {
-        return Err(AppError::from("A setup with that file name already exists."));
+        return Err(AppError::from(
+            "A setup with that file name already exists.",
+        ));
     }
 
     fs::write(&new_path, EMPTY_SETUP_CONTENT)?;
@@ -100,7 +109,9 @@ pub fn rename_local_setup(
         .join(sanitized_name);
 
     if renamed_path.exists() && renamed_path != path {
-        return Err(AppError::from("A setup with that file name already exists."));
+        return Err(AppError::from(
+            "A setup with that file name already exists.",
+        ));
     }
 
     fs::rename(&path, &renamed_path)?;
@@ -155,7 +166,7 @@ pub fn copy_local_setup_to_tracks(
 
     let mut validated_tracks = Vec::new();
     for target_track_path in target_track_paths {
-        let target_track = validate_existing_track_path(state, Path::new(target_track_path))?;
+        let target_track = ensure_track_folder(state, Path::new(target_track_path))?;
 
         if validated_tracks.iter().any(|path| path == &target_track) {
             continue;
@@ -167,9 +178,9 @@ pub fn copy_local_setup_to_tracks(
             ));
         }
 
-        let target_car_path = target_track.parent().ok_or_else(|| {
-            AppError::from("The selected destination track path is invalid.")
-        })?;
+        let target_car_path = target_track
+            .parent()
+            .ok_or_else(|| AppError::from("The selected destination track path is invalid."))?;
         if target_car_path != source_car_path {
             return Err(AppError::from(
                 "Setups can only be copied into tracks for the same car.",
@@ -217,12 +228,29 @@ pub fn write_setup_into_track(
     content: &str,
     overwrite: bool,
 ) -> AppResult<PathBuf> {
-    let track_path = validate_existing_track_path(state, track_path)?;
+    let track_path = ensure_track_folder(state, track_path)?;
     let sanitized_name = sanitize_file_name(target_file_name)?;
     let target_path = track_path.join(sanitized_name);
     if target_path.exists() && !overwrite {
-        return Err(AppError::from("A setup with that file name already exists."));
+        return Err(AppError::from(
+            "A setup with that file name already exists.",
+        ));
     }
+
+    validate_json(content)?;
+    fs::write(&target_path, content)?;
+    Ok(target_path)
+}
+
+pub fn write_setup_into_track_with_unique_name(
+    state: &AppState,
+    track_path: &Path,
+    target_file_name: &str,
+    content: &str,
+) -> AppResult<PathBuf> {
+    let track_path = ensure_track_folder(state, track_path)?;
+    let sanitized_name = sanitize_file_name(target_file_name)?;
+    let target_path = unique_copy_target_path(&track_path, &sanitized_name);
 
     validate_json(content)?;
     fs::write(&target_path, content)?;
@@ -232,27 +260,46 @@ pub fn write_setup_into_track(
 fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
     let root = settings::resolve_effective_root(settings)
         .ok_or_else(|| AppError::from("No valid setup root is configured."))?;
+    let root = fs::canonicalize(root)?;
 
     let mut cars = Vec::new();
     let mut tracks = Vec::new();
+    let mut track_folder_names = BTreeSet::new();
+    let car_entries = sorted_directory_entries(&root, true)?;
 
-    for car_entry in sorted_directory_entries(&root, true)? {
+    for car_entry in &car_entries {
+        for track_entry in sorted_directory_entries(&car_entry.path(), true)? {
+            track_folder_names.insert(track_entry.file_name());
+        }
+    }
+
+    let all_track_folder_names = sort_os_strings_case_insensitive(track_folder_names);
+
+    for car_entry in car_entries {
         let car_path = car_entry.path();
         let car_folder_name = car_entry.file_name().to_string_lossy().into_owned();
-        let track_entries = sorted_directory_entries(&car_path, true)?;
+        let existing_track_entries = sorted_directory_entries(&car_path, true)?;
+        let existing_track_names = existing_track_entries
+            .into_iter()
+            .map(|entry| entry.file_name())
+            .collect::<BTreeSet<_>>();
 
         cars.push(Car {
             id: path_to_string(&car_path),
             folder_name: car_folder_name.clone(),
             display_name: prettify_name(&car_folder_name),
             absolute_path: path_to_string(&car_path),
-            track_count: track_entries.len(),
+            track_count: all_track_folder_names.len(),
         });
 
-        for track_entry in track_entries {
-            let track_path = track_entry.path();
-            let track_folder_name = track_entry.file_name().to_string_lossy().into_owned();
-            let setup_count = count_directory_entries(&track_path, false)?;
+        for track_folder_name in &all_track_folder_names {
+            let track_path = car_path.join(track_folder_name);
+            let setup_count = if existing_track_names.contains(track_folder_name) {
+                count_directory_entries(&track_path, false)?
+            } else {
+                0
+            };
+            let track_folder_name = track_folder_name.to_string_lossy().into_owned();
 
             tracks.push(Track {
                 id: path_to_string(&track_path),
@@ -299,12 +346,30 @@ fn build_local_setup(setup_entry: fs::DirEntry, track_id: &str) -> AppResult<Loc
     })
 }
 
-fn validate_existing_track_path(state: &AppState, track_path: &Path) -> AppResult<PathBuf> {
-    let canonical_track_path = ensure_path_inside_root(state, track_path)?;
-    if !canonical_track_path.is_dir() {
-        return Err(AppError::from("The selected track folder no longer exists."));
+fn resolve_track_path(state: &AppState, track_path: &Path) -> AppResult<PathBuf> {
+    let resolved_track_path = ensure_path_inside_root(state, track_path)?;
+    let car_path = resolved_track_path
+        .parent()
+        .ok_or_else(|| AppError::from("The selected track path is invalid."))?;
+
+    if !car_path.is_dir() {
+        return Err(AppError::from("The selected car folder no longer exists."));
     }
-    Ok(canonical_track_path)
+
+    Ok(resolved_track_path)
+}
+
+fn ensure_track_folder(state: &AppState, track_path: &Path) -> AppResult<PathBuf> {
+    let resolved_track_path = resolve_track_path(state, track_path)?;
+    if resolved_track_path.exists() {
+        if !resolved_track_path.is_dir() {
+            return Err(AppError::from("The selected track path is not a folder."));
+        }
+        return Ok(resolved_track_path);
+    }
+
+    fs::create_dir_all(&resolved_track_path)?;
+    Ok(resolved_track_path)
 }
 
 fn validate_existing_setup_path(state: &AppState, setup_path: &Path) -> AppResult<PathBuf> {
@@ -320,7 +385,18 @@ fn ensure_path_inside_root(state: &AppState, path: &Path) -> AppResult<PathBuf> 
     let root = settings::resolve_effective_root(&settings)
         .ok_or_else(|| AppError::from("No valid setup root is configured."))?;
     let canonical_root = fs::canonicalize(root)?;
-    let canonical_path = fs::canonicalize(path)?;
+    let canonical_path = if path.exists() {
+        fs::canonicalize(path)?
+    } else {
+        let parent = path
+            .parent()
+            .ok_or_else(|| AppError::from("The requested path is invalid."))?;
+        let canonical_parent = fs::canonicalize(parent)?;
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| AppError::from("The requested path is invalid."))?;
+        canonical_parent.join(file_name)
+    };
 
     if !canonical_path.starts_with(&canonical_root) {
         return Err(AppError::from(
@@ -358,6 +434,12 @@ fn sorted_directory_entries(path: &Path, directories_only: bool) -> AppResult<Ve
     });
 
     Ok(entries)
+}
+
+fn sort_os_strings_case_insensitive(values: BTreeSet<OsString>) -> Vec<OsString> {
+    let mut values = values.into_iter().collect::<Vec<_>>();
+    values.sort_by_key(|value| value.to_string_lossy().to_string().to_lowercase());
+    values
 }
 
 fn count_directory_entries(path: &Path, directories_only: bool) -> AppResult<usize> {
@@ -441,9 +523,8 @@ fn sanitize_file_name(file_name: &str) -> AppResult<String> {
         .to_ascii_uppercase();
 
     const RESERVED_NAMES: [&str; 22] = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
-        "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
 
     if RESERVED_NAMES.contains(&stem.as_str()) {
@@ -484,9 +565,10 @@ fn path_to_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::unique_copy_target_path;
+    use super::{sort_os_strings_case_insensitive, unique_copy_target_path};
     use std::fs;
     use std::path::PathBuf;
+    use std::{collections::BTreeSet, ffi::OsString};
     use uuid::Uuid;
 
     fn create_temp_dir() -> PathBuf {
@@ -516,5 +598,25 @@ mod tests {
         assert_eq!(target_path, temp_dir.join("race (copy 2).json"));
 
         fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn sorts_track_names_case_insensitively() {
+        let values = BTreeSet::from([
+            OsString::from("zolder"),
+            OsString::from("Barcelona"),
+            OsString::from("brands_hatch"),
+        ]);
+
+        let sorted = sort_os_strings_case_insensitive(values);
+
+        assert_eq!(
+            sorted,
+            vec![
+                OsString::from("Barcelona"),
+                OsString::from("brands_hatch"),
+                OsString::from("zolder"),
+            ]
+        );
     }
 }

@@ -100,7 +100,10 @@ impl UndoOperation {
 
                 Ok(Self::Create { path, staged_path })
             }
-            Self::Copy { paths, staged_paths } => {
+            Self::Copy {
+                paths,
+                staged_paths,
+            } => {
                 for (path, staged_path) in paths.iter().zip(staged_paths.iter()) {
                     if path.exists() {
                         stage_file_copy(path, staging_dir, Some(staged_path))?;
@@ -108,7 +111,10 @@ impl UndoOperation {
                     }
                 }
 
-                Ok(Self::Copy { paths, staged_paths })
+                Ok(Self::Copy {
+                    paths,
+                    staged_paths,
+                })
             }
             Self::Rename { from, to } => {
                 if to.exists() {
@@ -149,7 +155,10 @@ impl UndoOperation {
 
                 Ok(Self::Create { path, staged_path })
             }
-            Self::Copy { paths, staged_paths } => {
+            Self::Copy {
+                paths,
+                staged_paths,
+            } => {
                 for (path, staged_path) in paths.iter().zip(staged_paths.iter()) {
                     if let Some(parent) = path.parent() {
                         fs::create_dir_all(parent)?;
@@ -158,7 +167,10 @@ impl UndoOperation {
                     fs::copy(staged_path, path)?;
                 }
 
-                Ok(Self::Copy { paths, staged_paths })
+                Ok(Self::Copy {
+                    paths,
+                    staged_paths,
+                })
             }
             Self::Rename { from, to } => {
                 if from.exists() {

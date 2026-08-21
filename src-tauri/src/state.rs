@@ -69,7 +69,8 @@ impl AppState {
         *self
             .remote_api_key
             .lock()
-            .map_err(|_| AppError::from("The remote source cache is unavailable."))? = Some(api_key);
+            .map_err(|_| AppError::from("The remote source cache is unavailable."))? =
+            Some(api_key);
         Ok(())
     }
 }

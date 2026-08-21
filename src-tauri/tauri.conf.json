@@ -12,13 +12,34 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "ACC Setup Manager",
-        "width": 1600,
-        "height": 960,
-        "minWidth": 1200,
-        "minHeight": 760,
+        "width": 1240,
+        "height": 820,
+        "minWidth": 860,
+        "minHeight": 620,
         "resizable": true,
-        "fullscreen": false
+        "visible": false,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true,
+        "backgroundColor": "#0A0B0C"
+      },
+      {
+        "label": "splashscreen",
+        "title": "ACC Setup Manager",
+        "url": "splashscreen.html",
+        "width": 560,
+        "height": 280,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true,
+        "alwaysOnTop": true,
+        "center": true,
+        "backgroundColor": "#0A0B0C"
       }
     ],
     "security": {

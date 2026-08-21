@@ -86,7 +86,9 @@ pub fn save_manual_root(db_path: &Path, path: Option<&Path>) -> AppResult<()> {
 
     if let Some(path) = path {
         if !path.is_dir() {
-            return Err(AppError::from("The selected setup root must be an existing folder."));
+            return Err(AppError::from(
+                "The selected setup root must be an existing folder.",
+            ));
         }
 
         connection.execute(
@@ -95,7 +97,10 @@ pub fn save_manual_root(db_path: &Path, path: Option<&Path>) -> AppResult<()> {
             params![MANUAL_ROOT_KEY, path_to_string(path)],
         )?;
     } else {
-        connection.execute("DELETE FROM settings WHERE key = ?1", params![MANUAL_ROOT_KEY])?;
+        connection.execute(
+            "DELETE FROM settings WHERE key = ?1",
+            params![MANUAL_ROOT_KEY],
+        )?;
     }
 
     Ok(())
@@ -106,11 +111,8 @@ pub fn resolve_effective_root(settings: &AppSettings) -> Option<PathBuf> {
 }
 
 fn detect_default_root() -> Option<PathBuf> {
-    dirs::document_dir().map(|documents| {
-        documents
-            .join("Assetto Corsa Competizione")
-            .join("Setups")
-    })
+    dirs::document_dir()
+        .map(|documents| documents.join("Assetto Corsa Competizione").join("Setups"))
 }
 
 fn open_connection(db_path: &Path) -> AppResult<Connection> {
