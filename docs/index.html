@@ -154,6 +154,45 @@
         margin-top: 0.75rem;
       }
 
+      .showcase {
+        margin-top: 0.75rem;
+      }
+
+      .showcase-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.9fr);
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+      }
+
+      .shot {
+        overflow: hidden;
+        padding: 0;
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+        background: #090a0b;
+      }
+
+      .shot-copy {
+        padding: 0.9rem 1rem 1rem;
+      }
+
+      .shot-copy h2 {
+        font-size: 0.88rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .shot-copy p {
+        margin-top: 0.45rem;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
       .list {
         margin: 0.55rem 0 0;
         padding-left: 1rem;
@@ -213,6 +252,39 @@
           <h2>Simply Lovely built in</h2>
           <p>Preview, cache, and download verified remote setups into the currently selected track folder.</p>
         </article>
+      </section>
+
+      <section class="showcase" aria-labelledby="screenshots-title">
+        <article class="panel">
+          <p class="eyebrow">Screenshots</p>
+          <h2 id="screenshots-title">The app in action</h2>
+          <p>
+            Real desktop captures from the current build, showing the local library workflow and the
+            editor workspace.
+          </p>
+        </article>
+        <div class="showcase-grid">
+          <article class="panel shot">
+            <img
+              src="./assets/app-overview.png"
+              alt="ACC Setup Manager desktop window showing the three-column setup browser and editor workspace"
+            />
+            <div class="shot-copy">
+              <h2>Local setup browser</h2>
+              <p>Browse cars, tracks, and setups in a single desktop workspace without leaving the ACC folder structure.</p>
+            </div>
+          </article>
+          <article class="panel shot">
+            <img
+              src="./assets/app-detail.png"
+              alt="ACC Setup Manager remote setups tab showing Ferrari 296 GT3 baselines for Barcelona"
+            />
+            <div class="shot-copy">
+              <h2>Remote baselines</h2>
+              <p>Browse verified remote setups for Ferrari 296 GT3 at Barcelona and pull them straight into the selected track folder.</p>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="grid" id="features">
