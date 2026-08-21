@@ -1,7 +1,6 @@
 import type { LocalSetup, RemoteSetup } from '../types/models'
 
 export type LocalSortMode = 'alphabetical' | 'recent'
-export type RemoteSortMode = 'alphabetical' | 'ranking'
 
 function normalizeValue(value: string): string {
   return value.trim().toLocaleLowerCase()
@@ -52,31 +51,8 @@ export function filterRemoteSetups(setups: RemoteSetup[], filter: string): Remot
   })
 }
 
-export function sortRemoteSetups(
-  setups: RemoteSetup[],
-  sortMode: RemoteSortMode,
-): RemoteSetup[] {
+export function sortRemoteSetups(setups: RemoteSetup[]): RemoteSetup[] {
   return [...setups].sort((left, right) => {
-    if (sortMode === 'ranking') {
-      const leftRanking = left.rankingLabel ?? ''
-      const rightRanking = right.rankingLabel ?? ''
-
-      if (leftRanking && rightRanking) {
-        return leftRanking.localeCompare(rightRanking, undefined, {
-          sensitivity: 'base',
-          numeric: true,
-        })
-      }
-
-      if (leftRanking) {
-        return -1
-      }
-
-      if (rightRanking) {
-        return 1
-      }
-    }
-
     return left.displayName.localeCompare(right.displayName, undefined, {
       sensitivity: 'base',
       numeric: true,

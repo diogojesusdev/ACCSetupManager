@@ -61,7 +61,7 @@ describe('setup list helpers', () => {
     ])
   })
 
-  it('filters and sorts remote setups with ranking first when present', () => {
+  it('filters and sorts remote setups alphabetically', () => {
     const setups = [
       {
         id: 'alpha',
@@ -79,7 +79,6 @@ describe('setup list helpers', () => {
         displayName: 'Race',
         fileName: 'race.json',
         sourcePageUrl: 'https://example.com/race',
-        rankingLabel: 'P1',
         previewAvailable: true,
         sourceMetadata: {
           setupType: 'race',
@@ -90,9 +89,9 @@ describe('setup list helpers', () => {
 
     expect(filterRemoteSetups(setups, 'alp')).toHaveLength(1)
     expect(filterRemoteSetups(setups, 'dry')).toHaveLength(1)
-    expect(sortRemoteSetups(setups, 'ranking').map((setup) => setup.id)).toEqual([
-      'race',
+    expect(sortRemoteSetups(setups).map((setup) => setup.id)).toEqual([
       'alpha',
+      'race',
     ])
   })
 })

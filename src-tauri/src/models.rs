@@ -133,7 +133,6 @@ pub struct RemoteSetup {
     pub source_page_url: String,
     pub download_url: Option<String>,
     pub updated_at: Option<String>,
-    pub ranking_label: Option<String>,
     pub author: Option<String>,
     pub preview_available: bool,
     pub source_metadata: Option<Value>,

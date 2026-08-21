@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { SetupDocument } from '../types/models'
-import type { LocalSortMode, RemoteSortMode } from '../lib/setup-list'
+import type { LocalSortMode } from '../lib/setup-list'
 
 export interface OpenDocumentState extends SetupDocument {
   savedContent: string
@@ -15,7 +15,6 @@ interface AppStoreState {
   activeRemoteSourceId: string
   selectedRemoteSetupIds: Record<string, string | null>
   remoteFilters: Record<string, string>
-  remoteSortModes: Record<string, RemoteSortMode>
   openDocument: OpenDocumentState | null
   setSelectedCarId: (carId: string | null) => void
   setSelectedTrackId: (trackId: string | null) => void
@@ -25,7 +24,6 @@ interface AppStoreState {
   setActiveRemoteSourceId: (value: string) => void
   setSelectedRemoteSetupId: (sourceId: string, setupId: string | null) => void
   setRemoteFilter: (sourceId: string, value: string) => void
-  setRemoteSortMode: (sourceId: string, value: RemoteSortMode) => void
   openDocumentPane: (document: SetupDocument) => void
   updateOpenDocumentContent: (content: string) => void
   markOpenDocumentSaved: (savedContent: string, newId?: string, newTitle?: string) => void
@@ -41,7 +39,6 @@ export const useAppStore = create<AppStoreState>((set) => ({
   activeRemoteSourceId: 'simply-lovely-setups',
   selectedRemoteSetupIds: {},
   remoteFilters: {},
-  remoteSortModes: {},
   openDocument: null,
   setSelectedCarId: (selectedCarId) => set({ selectedCarId }),
   setSelectedTrackId: (selectedTrackId) => set({ selectedTrackId }),
@@ -56,10 +53,6 @@ export const useAppStore = create<AppStoreState>((set) => ({
   setRemoteFilter: (sourceId, value) =>
     set((state) => ({
       remoteFilters: { ...state.remoteFilters, [sourceId]: value },
-    })),
-  setRemoteSortMode: (sourceId, value) =>
-    set((state) => ({
-      remoteSortModes: { ...state.remoteSortModes, [sourceId]: value },
     })),
   openDocumentPane: (document) =>
     set({
