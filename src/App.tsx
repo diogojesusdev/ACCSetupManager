@@ -80,12 +80,14 @@ import {
 import {
   filterLocalSetups,
   filterRemoteSetups,
+  isReservedGlobalSetupFileName,
   sortLocalSetups,
   sortRemoteSetups,
   type LocalSortMode,
 } from './lib/setup-list'
 import { loadCachedBootstrap, saveCachedBootstrap } from './lib/bootstrap-cache'
 import { useAppStore } from './state/app-store'
+import { GlobalSetupView } from './GlobalSetupView'
 import type { AppBootstrap, LocalSetup, MutationResult, RemoteSetup } from './types/models'
 
 const bootstrapQueryKey = ['bootstrap']
@@ -186,6 +188,7 @@ function App() {
     activeRemoteSourceId,
     selectedRemoteSetupIds,
     remoteFilters,
+    activeView,
     openDocument,
     setSelectedCarId,
     setSelectedTrackId,
@@ -199,6 +202,7 @@ function App() {
     updateOpenDocumentContent,
     markOpenDocumentSaved,
     closeOpenDocument,
+    setActiveView,
   } = useAppStore()
 
   const bootstrapQuery = useQuery({
@@ -1340,6 +1344,20 @@ function App() {
               </Alert>
             ) : null}
 
+            <Group justify="flex-start">
+              <SegmentedControl
+                value={activeView}
+                onChange={(value) => setActiveView(value as 'library' | 'global')}
+                data={[
+                  { value: 'library', label: 'Setup library' },
+                  { value: 'global', label: 'Global setup' },
+                ]}
+              />
+            </Group>
+
+            {activeView === 'global' ? (
+              <GlobalSetupView bootstrap={bootstrap} />
+            ) : (
             <Box className="workspace-grid">
               <Card withBorder radius="md" className="surface-card" p="xs">
                 <Stack gap="xs" h="100%">
@@ -1405,6 +1423,7 @@ function App() {
                 </Stack>
               </Card>
             </Box>
+            )}
           </Stack>
         </AppShell.Main>
       </AppShell>
@@ -1531,10 +1550,25 @@ function App() {
                 }
 
                 if (renameModal.mode === 'create') {
+                  if (isReservedGlobalSetupFileName(renameModal.fileName.trim())) {
+                    showError(
+                      "Couldn't create this setup",
+                      'That name is reserved for the ACC Manager global setup.',
+                    )
+                    return
+                  }
                   void createMutation.mutateAsync({
                     trackPath: renameModal.trackPath,
                     fileName: renameModal.fileName.trim(),
                   })
+                  return
+                }
+
+                if (isReservedGlobalSetupFileName(renameModal.fileName.trim())) {
+                  showError(
+                    "Couldn't rename this setup",
+                    'That name is reserved for the ACC Manager global setup.',
+                  )
                   return
                 }
 
@@ -1744,8 +1778,9 @@ function App() {
         <Stack>
           <Text size="sm" c="dimmed">
             Add <strong>{getSetupTitleFromFileName(remoteInstallModal?.fileName ?? '')}</strong> to
-            one or more tracks for <strong>{selectedCar?.displayName ?? 'this car'}</strong>. If a
-            setup already has this name, the new one will be given a different name.
+            one or more tracks for <strong>{selectedCar?.displayName ?? 'this car'}</strong>. If you
+            downloaded this setup to a track before, it will be replaced. Otherwise, a setup with a
+            matching name is kept and the new one gets a different name.
           </Text>
           <Stack gap="xs">
             <Group justify="space-between" align="center" wrap="wrap" gap="xs">

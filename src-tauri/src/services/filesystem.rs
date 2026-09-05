@@ -1,7 +1,8 @@
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use std::{collections::BTreeSet, ffi::OsString};
 
 use chrono::{DateTime, Utc};
 
@@ -14,7 +15,7 @@ use crate::services::settings;
 use crate::state::AppState;
 
 const EMPTY_SETUP_CONTENT: &str = "{}\n";
-const KNOWN_ACC_TRACK_FOLDER_NAMES: &[&str] = &[
+pub(crate) const KNOWN_ACC_TRACK_FOLDER_NAMES: &[&str] = &[
     "monza",
     "zolder",
     "brands_hatch",
@@ -149,6 +150,11 @@ pub fn rename_local_setup(
 
 pub fn delete_local_setup(state: &AppState, path: &Path) -> AppResult<(PathBuf, PathBuf)> {
     let path = validate_existing_setup_path(state, path)?;
+    if crate::services::global_setup::is_reserved_setup_path(&path) {
+        return Err(AppError::from(
+            "The ACC Manager global setup cannot be deleted from here. Use the Global Setup view.",
+        ));
+    }
     let staged_path = state.new_staged_file_path("delete")?;
     fs::copy(&path, &staged_path)?;
     trash::delete(&path)?;
@@ -271,21 +277,6 @@ pub fn write_setup_into_track(
     Ok(target_path)
 }
 
-pub fn write_setup_into_track_with_unique_name(
-    state: &AppState,
-    track_path: &Path,
-    target_file_name: &str,
-    content: &str,
-) -> AppResult<PathBuf> {
-    let track_path = ensure_track_folder(state, track_path)?;
-    let sanitized_name = sanitize_file_name(target_file_name)?;
-    let target_path = unique_copy_target_path(&track_path, &sanitized_name);
-
-    validate_json(content)?;
-    fs::write(&target_path, content)?;
-    Ok(target_path)
-}
-
 fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
     let root = settings::resolve_effective_root(settings)
         .ok_or_else(|| AppError::from("No valid setup root is configured."))?;
@@ -293,42 +284,49 @@ fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
 
     let mut cars = Vec::new();
     let mut tracks = Vec::new();
-    let mut track_folder_names = BTreeSet::new();
     let car_entries = sorted_directory_entries(&root, true)?;
 
+    let mut track_folder_names = BTreeMap::new();
     for car_entry in &car_entries {
         for track_entry in sorted_directory_entries(&car_entry.path(), true)? {
-            track_folder_names.insert(track_entry.file_name());
+            let file_name = track_entry.file_name();
+            track_folder_names
+                .entry(track_key(&file_name))
+                .or_insert(file_name);
         }
     }
-
-    let all_track_folder_names = sort_os_strings_case_insensitive(track_folder_names);
+    let track_folder_names = collect_track_folder_names(track_folder_names);
 
     for car_entry in car_entries {
         let car_path = car_entry.path();
         let car_folder_name = car_entry.file_name().to_string_lossy().into_owned();
-        let existing_track_entries = sorted_directory_entries(&car_path, true)?;
-        let existing_track_names = existing_track_entries
+        let existing_tracks = sorted_directory_entries(&car_path, true)?
             .into_iter()
-            .map(|entry| entry.file_name())
-            .collect::<BTreeSet<_>>();
+            .map(|entry| {
+                let file_name = entry.file_name();
+                (track_key(&file_name), file_name)
+            })
+            .collect::<BTreeMap<_, _>>();
 
         cars.push(Car {
             id: path_to_string(&car_path),
             folder_name: car_folder_name.clone(),
             display_name: prettify_name(&car_folder_name),
             absolute_path: path_to_string(&car_path),
-            track_count: all_track_folder_names.len(),
+            track_count: track_folder_names.len(),
         });
 
-        for track_folder_name in &all_track_folder_names {
-            let track_path = car_path.join(track_folder_name);
-            let setup_count = if existing_track_names.contains(track_folder_name) {
-                count_directory_entries(&track_path, false)?
+        for (track_key, canonical_name) in &track_folder_names {
+            let track_folder_name = existing_tracks
+                .get(track_key)
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| canonical_name.to_string_lossy().into_owned());
+            let track_path = car_path.join(&track_folder_name);
+            let setup_count = if existing_tracks.contains_key(track_key) {
+                scan_track_setups(&track_path)?.len()
             } else {
                 0
             };
-            let track_folder_name = track_folder_name.to_string_lossy().into_owned();
 
             tracks.push(Track {
                 id: path_to_string(&track_path),
@@ -342,6 +340,16 @@ fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
     }
 
     Ok(LocalLibrary { cars, tracks })
+}
+
+fn track_key(file_name: &OsString) -> String {
+    file_name.to_string_lossy().to_lowercase()
+}
+
+fn collect_track_folder_names(
+    by_key: BTreeMap<String, OsString>,
+) -> Vec<(String, OsString)> {
+    by_key.into_iter().collect()
 }
 
 fn ensure_known_track_folders(settings: &AppSettings) -> AppResult<()> {
@@ -379,6 +387,9 @@ fn scan_track_setups(track_path: &Path) -> AppResult<Vec<LocalSetup>> {
     let track_id = path_to_string(track_path);
     sorted_directory_entries(track_path, false)?
         .into_iter()
+        .filter(|setup_entry| {
+            !crate::services::global_setup::is_reserved_setup_path(&setup_entry.path())
+        })
         .map(|setup_entry| build_local_setup(setup_entry, &track_id))
         .collect()
 }
@@ -419,7 +430,7 @@ fn resolve_track_path(state: &AppState, track_path: &Path) -> AppResult<PathBuf>
     Ok(resolved_track_path)
 }
 
-fn ensure_track_folder(state: &AppState, track_path: &Path) -> AppResult<PathBuf> {
+pub(crate) fn ensure_track_folder(state: &AppState, track_path: &Path) -> AppResult<PathBuf> {
     let resolved_track_path = resolve_track_path(state, track_path)?;
     if resolved_track_path.exists() {
         if !resolved_track_path.is_dir() {
@@ -496,37 +507,12 @@ fn sorted_directory_entries(path: &Path, directories_only: bool) -> AppResult<Ve
     Ok(entries)
 }
 
-fn sort_os_strings_case_insensitive(values: BTreeSet<OsString>) -> Vec<OsString> {
-    let mut values = values.into_iter().collect::<Vec<_>>();
-    values.sort_by_key(|value| value.to_string_lossy().to_string().to_lowercase());
-    values
-}
-
-fn count_directory_entries(path: &Path, directories_only: bool) -> AppResult<usize> {
-    Ok(fs::read_dir(path)?
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .filter(|entry| {
-            entry
-                .file_type()
-                .map(|file_type| {
-                    if directories_only {
-                        file_type.is_dir()
-                    } else {
-                        file_type.is_file()
-                    }
-                })
-                .unwrap_or(false)
-        })
-        .count())
-}
-
 fn validate_json(content: &str) -> AppResult<()> {
     serde_json::from_str::<serde_json::Value>(content)?;
     Ok(())
 }
 
-fn unique_copy_target_path(track_path: &Path, file_name: &str) -> PathBuf {
+pub(crate) fn unique_copy_target_path(track_path: &Path, file_name: &str) -> PathBuf {
     let preferred_path = track_path.join(file_name);
     if !preferred_path.exists() {
         return preferred_path;
@@ -558,7 +544,7 @@ fn unique_copy_target_path(track_path: &Path, file_name: &str) -> PathBuf {
     }
 }
 
-fn sanitize_file_name(file_name: &str) -> AppResult<String> {
+pub(crate) fn sanitize_file_name(file_name: &str) -> AppResult<String> {
     let trimmed = file_name.trim();
     if trimmed.is_empty() {
         return Err(AppError::from("A setup file name is required."));
@@ -589,6 +575,12 @@ fn sanitize_file_name(file_name: &str) -> AppResult<String> {
 
     if RESERVED_NAMES.contains(&stem.as_str()) {
         return Err(AppError::from("That file name is reserved on Windows."));
+    }
+
+    if crate::services::global_setup::is_reserved_setup_stem(trimmed) {
+        return Err(AppError::from(
+            "That file name is reserved for the ACC Manager global setup.",
+        ));
     }
 
     Ok(trimmed.to_owned())
@@ -626,12 +618,12 @@ fn path_to_string(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_known_track_folders, sort_os_strings_case_insensitive, unique_copy_target_path,
-        KNOWN_ACC_TRACK_FOLDER_NAMES,
+        collect_track_folder_names, ensure_known_track_folders, scan_local_library,
+        unique_copy_target_path, KNOWN_ACC_TRACK_FOLDER_NAMES,
     };
+    use std::ffi::OsString;
     use std::fs;
     use std::path::PathBuf;
-    use std::{collections::BTreeSet, ffi::OsString};
     use uuid::Uuid;
 
     use crate::models::{AppSettings, RootStatus};
@@ -716,22 +708,64 @@ mod tests {
     }
 
     #[test]
-    fn sorts_track_names_case_insensitively() {
-        let values = BTreeSet::from([
+    fn dedupes_and_sorts_track_names_case_insensitively() {
+        let mut names = std::collections::BTreeMap::new();
+        for name in [
             OsString::from("zolder"),
             OsString::from("Barcelona"),
             OsString::from("brands_hatch"),
-        ]);
+            OsString::from("SPA"),
+            OsString::from("spa"),
+        ] {
+            names
+                .entry(name.to_string_lossy().to_lowercase())
+                .or_insert(name);
+        }
 
-        let sorted = sort_os_strings_case_insensitive(values);
+        let collected = collect_track_folder_names(names);
 
         assert_eq!(
-            sorted,
+            collected,
             vec![
-                OsString::from("Barcelona"),
-                OsString::from("brands_hatch"),
-                OsString::from("zolder"),
+                ("barcelona".to_owned(), OsString::from("Barcelona")),
+                ("brands_hatch".to_owned(), OsString::from("brands_hatch")),
+                ("spa".to_owned(), OsString::from("SPA")),
+                ("zolder".to_owned(), OsString::from("zolder")),
             ]
         );
+    }
+
+    #[test]
+    fn scans_case_variant_track_folders_once_per_car() {
+        let temp_dir = create_temp_dir();
+        let first_car_path = temp_dir.join("bmw_m4_gt3");
+        let second_car_path = temp_dir.join("ferrari_296_gt3");
+        fs::create_dir_all(first_car_path.join("Spa")).expect("create first track");
+        fs::create_dir_all(second_car_path.join("spa")).expect("create second track");
+
+        let library = scan_local_library(&settings_with_root(&temp_dir)).expect("scan library");
+
+        assert_eq!(library.cars.len(), 2);
+        for car in &library.cars {
+            let car_tracks = library
+                .tracks
+                .iter()
+                .filter(|track| track.car_id == car.id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                car_tracks.len(),
+                1,
+                "car '{}' got duplicate track entries",
+                car.folder_name
+            );
+            assert_eq!(car_tracks[0].folder_name.to_lowercase(), "spa");
+        }
+
+        let first = &library.tracks[0];
+        let second = &library.tracks[1];
+        assert_eq!(first.folder_name, "Spa");
+        assert_eq!(second.folder_name, "spa");
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
 }

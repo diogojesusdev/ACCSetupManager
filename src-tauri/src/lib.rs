@@ -112,6 +112,8 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            services::global_setup::spawn_watcher(app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -154,6 +156,12 @@ pub fn run() {
             commands::read_remote_setup_document,
             commands::download_remote_setup,
             commands::download_remote_setup_to_tracks,
+            commands::global_setup_get_state,
+            commands::global_setup_enable,
+            commands::global_setup_disable,
+            commands::global_setup_push,
+            commands::global_setup_adopt,
+            commands::global_setup_save_master,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,8 +3,11 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{AppBootstrap, LocalSetup, MutationResult, RemoteSourceResult, SetupDocument};
+use crate::models::{
+    AppBootstrap, GlobalSetupState, LocalSetup, MutationResult, RemoteSourceResult, SetupDocument,
+};
 use crate::services::filesystem;
+use crate::services::global_setup;
 use crate::services::remote;
 use crate::services::settings;
 use crate::services::undo::UndoOperation;
@@ -252,4 +255,45 @@ pub fn download_remote_setup_to_tracks(
         staged_paths,
     });
     filesystem::mutation_result(&state, imported_paths.first().cloned())
+}
+
+#[tauri::command]
+pub fn global_setup_get_state(state: State<'_, AppState>) -> AppResult<GlobalSetupState> {
+    global_setup::get_state(&state)
+}
+
+#[tauri::command]
+pub fn global_setup_enable(state: State<'_, AppState>) -> AppResult<MutationResult> {
+    global_setup::enable(&state)?;
+    filesystem::mutation_result(&state, None)
+}
+
+#[tauri::command]
+pub fn global_setup_disable(state: State<'_, AppState>) -> AppResult<MutationResult> {
+    global_setup::disable(&state)?;
+    filesystem::mutation_result(&state, None)
+}
+
+#[tauri::command]
+pub fn global_setup_push(state: State<'_, AppState>) -> AppResult<MutationResult> {
+    global_setup::push(&state)?;
+    filesystem::mutation_result(&state, None)
+}
+
+#[tauri::command]
+pub fn global_setup_adopt(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> AppResult<MutationResult> {
+    global_setup::adopt(&state, PathBuf::from(source_path).as_path())?;
+    filesystem::mutation_result(&state, None)
+}
+
+#[tauri::command]
+pub fn global_setup_save_master(
+    state: State<'_, AppState>,
+    content: String,
+) -> AppResult<MutationResult> {
+    global_setup::save_master(&state, &content)?;
+    filesystem::mutation_result(&state, None)
 }

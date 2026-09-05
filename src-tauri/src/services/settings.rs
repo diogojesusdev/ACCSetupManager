@@ -39,6 +39,18 @@ pub fn initialize_database(db_path: &Path) -> AppResult<()> {
           created_at TEXT NOT NULL,
           metadata_json TEXT
         );
+        CREATE TABLE IF NOT EXISTS global_meta (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          feature_enabled INTEGER NOT NULL DEFAULT 0,
+          master_hash TEXT
+        );
+        CREATE TABLE IF NOT EXISTS global_sync_state (
+          car_folder TEXT NOT NULL,
+          track_folder TEXT NOT NULL,
+          synced_hash TEXT NOT NULL,
+          synced_at TEXT NOT NULL,
+          PRIMARY KEY (car_folder, track_folder)
+        );
         ",
     )?;
     Ok(())

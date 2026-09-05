@@ -145,3 +145,32 @@ pub struct RemoteDownloadDescriptor {
     pub suggested_file_name: String,
     pub source_page_url: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalSetupState {
+    pub feature_enabled: bool,
+    pub status: GlobalSetupStatus,
+    pub master_path: Option<String>,
+    pub owned_file_count: usize,
+    pub cars: Vec<GlobalSetupCarStatus>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GlobalSetupStatus {
+    Disabled,
+    NoMaster,
+    MasterModified,
+    Synced,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalSetupCarStatus {
+    pub car_folder: String,
+    pub display_name: String,
+    pub in_sync: usize,
+    pub missing: usize,
+    pub diverged: usize,
+}

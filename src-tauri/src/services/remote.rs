@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::Path;
 
 use chrono::{DateTime, Duration, Utc};
@@ -217,23 +218,33 @@ pub fn download_remote_setup_to_tracks(
     let mut imported_paths = Vec::new();
 
     for track_path in target_track_paths {
-        let imported_path = filesystem::write_setup_into_track_with_unique_name(
-            state,
-            Path::new(track_path),
-            target_file_name,
-            &content,
-        )?;
+        let track_path = filesystem::ensure_track_folder(state, Path::new(track_path))?;
+        let sanitized_name = filesystem::sanitize_file_name(target_file_name)?;
+        let preferred_path = track_path.join(&sanitized_name);
+        let target_path = if preferred_path.is_file()
+            && was_previously_downloaded_from_same_setup(
+                &state.db_path,
+                source_id,
+                &preferred_path,
+                remote_setup_id,
+            )? {
+            preferred_path
+        } else {
+            filesystem::unique_copy_target_path(&track_path, &sanitized_name)
+        };
+
+        fs::write(&target_path, &content)?;
         record_download_history(
             &state.db_path,
             source_id,
-            &imported_path,
+            &target_path,
             &json!({
                 "remoteSetupId": remote_setup_id,
                 "sourcePageUrl": simply_lovely_source_page_url(remote_setup_id),
                 "fileName": detail.file_name,
             }),
         )?;
-        imported_paths.push(imported_path);
+        imported_paths.push(target_path);
     }
 
     Ok(imported_paths)
@@ -393,6 +404,31 @@ fn record_download_history(
         ],
     )?;
     Ok(())
+}
+
+fn was_previously_downloaded_from_same_setup(
+    db_path: &Path,
+    source_id: &str,
+    target_path: &Path,
+    remote_setup_id: &str,
+) -> AppResult<bool> {
+    let connection = Connection::open(db_path)?;
+    let mut statement = connection.prepare(
+        "SELECT metadata_json FROM download_history WHERE source_id = ?1 AND target_path = ?2",
+    )?;
+    let rows = statement.query_map(
+        params![source_id, target_path.to_string_lossy().into_owned()],
+        |row| row.get::<_, String>(0),
+    )?;
+
+    for row in rows {
+        let metadata: Value = serde_json::from_str(&row?).unwrap_or(Value::Null);
+        if metadata.get("remoteSetupId").and_then(Value::as_str) == Some(remote_setup_id) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn parse_rfc3339(value: &str) -> DateTime<Utc> {

@@ -26,18 +26,22 @@ impl AppState {
 
         let db_path = app_data_dir.join("acc-setup-manager.db");
         settings::initialize_database(&db_path)?;
-
-        let staging_dir = app_data_dir
-            .join("session-staging")
-            .join(Uuid::new_v4().to_string());
-        fs::create_dir_all(&staging_dir)?;
-
-        Ok(Self {
-            db_path,
-            undo_manager: Mutex::new(UndoManager::new(staging_dir.clone())),
+        let app_state = Self {
+            db_path: db_path.clone(),
+            undo_manager: Mutex::new(UndoManager::new(app_data_dir.join("session-staging").join(
+                Uuid::new_v4().to_string(),
+            ))),
             remote_api_key: Mutex::new(None),
-            staging_dir,
-        })
+            staging_dir: app_data_dir
+                .join("session-staging")
+                .join(Uuid::new_v4().to_string()),
+        };
+        fs::create_dir_all(&app_state.staging_dir)?;
+        if let Err(error) = crate::services::global_setup::reconcile(&app_state) {
+            log::error!("global setup startup reconciliation failed: {error}");
+        }
+
+        Ok(app_state)
     }
 
     pub fn undo_state(&self) -> AppResult<UndoState> {

@@ -102,3 +102,21 @@ export interface RemoteSourceResult {
   stale: boolean
   message: string
 }
+
+export type GlobalSetupStatus = 'disabled' | 'no_master' | 'master_modified' | 'synced'
+
+export interface GlobalSetupCarStatus {
+  carFolder: string
+  displayName: string
+  inSync: number
+  missing: number
+  diverged: number
+}
+
+export interface GlobalSetupState {
+  featureEnabled: boolean
+  status: GlobalSetupStatus
+  masterPath: string | null
+  ownedFileCount: number
+  cars: GlobalSetupCarStatus[]
+}
