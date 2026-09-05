@@ -4,17 +4,16 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
-use chrono::Utc;
 use notify::{RecursiveMode, Watcher};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{GlobalSetupCarStatus, GlobalSetupState, GlobalSetupStatus};
+use crate::models::{DocumentKind, SetupDocument};
 use crate::services::filesystem::KNOWN_ACC_TRACK_FOLDER_NAMES;
+use crate::services::global_baselines::seed_content_for;
 use crate::services::settings;
-use crate::services::undo::{GlobalSyncMode, UndoOperation};
 use crate::state::AppState;
 
 pub const RESERVED_SETUP_STEM: &str = "acc manager global setup";
@@ -33,256 +32,9 @@ pub fn is_reserved_setup_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-const DEFAULT_BASELINE_SETUP: &str = r##"{
-	"carName": "bentley_continental_gt3_2018",
-	"basicSetup": {
-		"tyres": {
-			"tyreCompound": 0,
-			"tyrePressure": [
-				51,
-				52,
-				50,
-				51
-			]
-		},
-		"alignment": {
-			"camber": [
-				0,
-				0,
-				3,
-				3
-			],
-			"toe": [
-				28,
-				28,
-				52,
-				52
-			],
-			"staticCamber": [
-				0.0,
-				0.0,
-				0.0,
-				0.0
-			],
-			"toeOutLinear": [
-				0.0,
-				0.0,
-				0.0,
-				0.0
-			],
-			"casterLF": 24,
-			"casterRF": 24,
-			"steerRatio": 2
-		},
-		"electronics": {
-			"tC1": 4,
-			"tC2": 3,
-			"abs": 2,
-			"eCUMap": 1,
-			"fuelMix": 0,
-			"telemetryLaps": 0
-		},
-		"strategy": {
-			"fuel": 40,
-			"nPitStops": 0,
-			"tyreSet": 0,
-			"frontBrakePadCompound": 0,
-			"rearBrakePadCompound": 0,
-			"pitStrategy": [
-				{
-					"fuelToAdd": 0,
-					"tyres": {
-						"tyreCompound": 0,
-						"tyrePressure": [
-							51,
-							52,
-							50,
-							51
-						]
-					},
-					"tyreSet": 2,
-					"frontBrakePadCompound": 0,
-					"rearBrakePadCompound": 0
-				}
-			],
-			"fuelPerLap": 3.4
-		}
-	},
-	"advancedSetup": {
-		"mechanicalBalance": {
-			"aRBFront": 2,
-			"aRBRear": 5,
-			"wheelRate": [
-				8,
-				8,
-				10,
-				10
-			],
-			"bumpStopRateUp": [
-				4,
-				4,
-				3,
-				3
-			],
-			"bumpStopRateDn": [
-				0,
-				0,
-				10,
-				10
-			],
-			"bumpStopWindow": [
-				6,
-				6,
-				52,
-				52
-			],
-			"brakeTorque": 20,
-			"brakeBias": 41
-		},
-		"dampers": {
-			"bumpSlow": [
-				12,
-				12,
-				16,
-				16
-			],
-			"bumpFast": [
-				12,
-				12,
-				14,
-				14
-			],
-			"reboundSlow": [
-				18,
-				18,
-				22,
-				22
-			],
-			"reboundFast": [
-				22,
-				22,
-				18,
-				18
-			]
-		},
-		"aeroBalance": {
-			"rideHeight": [
-				3,
-				3,
-				7,
-				7
-			],
-			"rodLength": [
-				0.0,
-				0.0,
-				0.0,
-				0.0
-			],
-			"splitter": 0,
-			"rearWing": 5,
-			"brakeDuct": [
-				3,
-				3
-			]
-		},
-		"drivetrain": {
-			"preload": 4
-		}
-	},
-	"trackBopType": 27
-}"##;
-
-struct GlobalMeta {
-    feature_enabled: bool,
-    master_hash: Option<String>,
-}
-
-fn load_meta(db_path: &Path) -> AppResult<GlobalMeta> {
-    let connection = open_connection(db_path)?;
-    let row = connection
-        .query_row(
-            "SELECT feature_enabled, master_hash FROM global_meta WHERE id = 1",
-            [],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)? != 0,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            },
-        )
-        .optional()?;
-
-    Ok(row.map(|(feature_enabled, master_hash)| GlobalMeta {
-        feature_enabled,
-        master_hash,
-    }).unwrap_or(GlobalMeta {
-        feature_enabled: false,
-        master_hash: None,
-    }))
-}
-
-fn set_feature_enabled(db_path: &Path, enabled: bool) -> AppResult<()> {
-    let connection = open_connection(db_path)?;
-    connection.execute(
-        "INSERT INTO global_meta (id, feature_enabled, master_hash)
-         VALUES (1, ?1, NULL)
-         ON CONFLICT(id) DO UPDATE SET feature_enabled = excluded.feature_enabled",
-        params![enabled as i64],
-    )?;
-    Ok(())
-}
-
-fn set_master_hash(db_path: &Path, hash: &str) -> AppResult<()> {
-    let connection = open_connection(db_path)?;
-    connection.execute(
-        "INSERT INTO global_meta (id, feature_enabled, master_hash)
-         VALUES (1, 0, ?1)
-         ON CONFLICT(id) DO UPDATE SET master_hash = excluded.master_hash",
-        params![hash],
-    )?;
-    Ok(())
-}
-
-fn upsert_sync_rows(
-    db_path: &Path,
-    combos: &[(String, String)],
-    hash: &str,
-) -> AppResult<()> {
-    let connection = open_connection(db_path)?;
-    let now = Utc::now().to_rfc3339();
-    for (car_folder, track_folder) in combos {
-        connection.execute(
-            "INSERT INTO global_sync_state (car_folder, track_folder, synced_hash, synced_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(car_folder, track_folder)
-             DO UPDATE SET synced_hash = excluded.synced_hash, synced_at = excluded.synced_at",
-            params![car_folder, track_folder, hash, now],
-        )?;
-    }
-    Ok(())
-}
-
-fn clear_sync_rows(db_path: &Path) -> AppResult<()> {
-    let connection = open_connection(db_path)?;
-    connection.execute("DELETE FROM global_sync_state", [])?;
-    Ok(())
-}
-
-fn load_sync_rows(db_path: &Path) -> AppResult<Vec<(String, String, String)>> {
-    let connection = open_connection(db_path)?;
-    let mut statement = connection.prepare(
-        "SELECT car_folder, track_folder, synced_hash FROM global_sync_state",
-    )?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
+/// The path of a car's global setup master file, given that car's folder path.
+pub fn car_master_path(car_path: &Path) -> PathBuf {
+    car_path.join(MASTER_FILE_NAME)
 }
 
 fn open_connection(db_path: &Path) -> AppResult<Connection> {
@@ -302,324 +54,156 @@ fn effective_root(state: &AppState) -> AppResult<PathBuf> {
         .ok_or_else(|| AppError::from("No valid setup root is configured."))
 }
 
-fn master_path_for_root(root: &Path) -> PathBuf {
-    root.join(MASTER_FILE_NAME)
+fn upsert_sync_rows(db_path: &Path, combos: &[(String, String)], hash: &str) -> AppResult<()> {
+    let connection = open_connection(db_path)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for (car_folder, track_folder) in combos {
+        connection.execute(
+            "INSERT INTO global_sync_state (car_folder, track_folder, synced_hash, synced_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(car_folder, track_folder)
+             DO UPDATE SET synced_hash = excluded.synced_hash, synced_at = excluded.synced_at",
+            params![car_folder, track_folder, hash, now],
+        )?;
+    }
+    Ok(())
 }
 
-fn read_master(root: &Path) -> Option<String> {
-    fs::read_to_string(master_path_for_root(root)).ok()
+fn load_sync_rows_for_car(db_path: &Path, car_folder: &str) -> AppResult<Vec<(String, String)>> {
+    let connection = open_connection(db_path)?;
+    let mut statement = connection.prepare(
+        "SELECT track_folder, synced_hash FROM global_sync_state WHERE car_folder = ?1",
+    )?;
+    let rows = statement
+        .query_map(params![car_folder], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
-struct Combo {
-    car_folder: String,
-    track_folder: String,
-    owned_path: PathBuf,
-}
+/// Every track folder name that should exist for one car: the known ACC track set
+/// plus whatever track folders already exist on disk. Missing known folders are
+/// created; this mirrors the app's existing track-folder backfill behavior.
+fn collect_car_track_folders(car_path: &Path) -> AppResult<Vec<String>> {
+    let mut track_folders: BTreeMap<String, String> = BTreeMap::new();
+    for track_folder_name in KNOWN_ACC_TRACK_FOLDER_NAMES {
+        track_folders.insert(track_folder_name.to_string(), track_folder_name.to_string());
+    }
 
-fn collect_combos(root: &Path) -> AppResult<Vec<Combo>> {
-    let mut combos = Vec::new();
-    for car_entry in sorted_directories(root)? {
-        let car_path = car_entry.path();
-        let car_folder = car_entry.file_name().to_string_lossy().into_owned();
-        let mut track_folders: BTreeMap<String, String> = BTreeMap::new();
-        for track_folder_name in KNOWN_ACC_TRACK_FOLDER_NAMES {
-            track_folders.insert(
-                track_folder_name.to_string(),
-                track_folder_name.to_string(),
-            );
-        }
-        for track_entry in sorted_directories(&car_path)? {
-            let file_name = track_entry.file_name();
-            track_folders.insert(
-                file_name.to_string_lossy().to_lowercase(),
-                file_name.to_string_lossy().into_owned(),
-            );
-        }
-
-        for (_, track_folder) in track_folders {
-            let track_path = car_path.join(&track_folder);
-            if !track_path.exists() {
-                fs::create_dir_all(&track_path)?;
+    if car_path.is_dir() {
+        for entry in fs::read_dir(car_path)? {
+            let entry = entry?;
+            if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+                continue;
             }
-            combos.push(Combo {
-                owned_path: track_path.join(MASTER_FILE_NAME),
-                car_folder: car_folder.clone(),
-                track_folder,
-            });
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            // On-disk casing takes precedence over the known-name canonical casing.
+            track_folders.insert(file_name.to_lowercase(), file_name);
         }
     }
 
-    Ok(combos)
+    for track_folder in track_folders.values() {
+        let track_path = car_path.join(track_folder);
+        if !track_path.exists() {
+            fs::create_dir_all(&track_path)?;
+        }
+    }
+
+    Ok(track_folders.into_values().collect())
 }
 
-fn sorted_directories(path: &Path) -> AppResult<Vec<fs::DirEntry>> {
-    let mut entries = fs::read_dir(path)?
+fn sorted_car_folders(root: &Path) -> AppResult<Vec<String>> {
+    let mut names = fs::read_dir(root)?
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
-    Ok(entries)
+    names.sort_by_key(|name| name.to_lowercase());
+    Ok(names)
 }
 
-pub fn get_state(state: &AppState) -> AppResult<GlobalSetupState> {
-    let meta = load_meta(&state.db_path)?;
-    if !meta.feature_enabled {
-        return Ok(GlobalSetupState {
-            feature_enabled: false,
-            status: GlobalSetupStatus::Disabled,
-            master_path: None,
-            owned_file_count: 0,
-            cars: Vec::new(),
-        });
-    }
+/// Writes `content` into every track folder for `car_folder` and records the sync
+/// state. This is the single write path for all car-scoped fan-out: initial
+/// seeding, in-app saves, adopts, promotions and restores all go through it.
+fn fan_out_car(state: &AppState, root: &Path, car_folder: &str, content: &str) -> AppResult<usize> {
+    let car_path = root.join(car_folder);
+    let track_folders = collect_car_track_folders(&car_path)?;
+    let hash = hash_content(content);
 
+    let mut combo_keys = Vec::with_capacity(track_folders.len());
+    for track_folder in &track_folders {
+        let owned_path = car_path.join(track_folder).join(MASTER_FILE_NAME);
+        fs::write(&owned_path, content)?;
+        combo_keys.push((car_folder.to_owned(), track_folder.clone()));
+    }
+    upsert_sync_rows(&state.db_path, &combo_keys, &hash)?;
+
+    Ok(track_folders.len())
+}
+
+fn emit_state_changed(app_handle: &AppHandle) {
+    if let Err(error) = app_handle.emit(GLOBAL_SETUP_CHANGED_EVENT, ()) {
+        log::error!("global setup: failed to emit state-changed event: {error}");
+    }
+}
+
+/// Reads a car's master content, self-healing (recreating it from the shipped
+/// baseline or a neutral skeleton) if it is missing.
+pub fn get_master_content(state: &AppState, car_folder: &str) -> AppResult<String> {
     let root = effective_root(state)?;
-    let master_path = master_path_for_root(&root);
-    let master_content = read_master(&root);
-    if master_content.is_none() {
-        return Ok(GlobalSetupState {
-            feature_enabled: true,
-            status: GlobalSetupStatus::NoMaster,
-            master_path: Some(master_path.to_string_lossy().into_owned()),
-            owned_file_count: 0,
-            cars: Vec::new(),
-        });
+    let car_path = root.join(car_folder);
+    if !car_path.is_dir() {
+        return Err(AppError::from("The selected car folder no longer exists."));
     }
 
-    let master_hash = hash_content(master_content.as_deref().unwrap_or_default());
-    let distributed_hash = meta.master_hash.clone();
-    let status = if Some(&master_hash) != distributed_hash.as_ref() {
-        GlobalSetupStatus::MasterModified
-    } else {
-        GlobalSetupStatus::Synced
-    };
-
-    let mut car_status: BTreeMap<String, GlobalSetupCarStatus> = BTreeMap::new();
-    let mut owned_file_count = 0usize;
-    for (car_folder, track_folder, synced_hash) in load_sync_rows(&state.db_path)? {
-        let owned_path = root.join(&car_folder).join(&track_folder).join(MASTER_FILE_NAME);
-        let entry = car_status
-            .entry(car_folder.clone())
-            .or_insert_with(|| GlobalSetupCarStatus {
-                car_folder: car_folder.clone(),
-                display_name: prettify(&car_folder),
-                in_sync: 0,
-                missing: 0,
-                diverged: 0,
-            });
-
-        if !owned_path.exists() {
-            entry.missing += 1;
-        } else if synced_hash != master_hash {
-            entry.diverged += 1;
-        } else {
-            entry.in_sync += 1;
-        }
-        owned_file_count += 1;
+    let master_path = car_master_path(&car_path);
+    if let Ok(content) = fs::read_to_string(&master_path) {
+        return Ok(content);
     }
 
-    Ok(GlobalSetupState {
-        feature_enabled: true,
-        status,
-        master_path: Some(master_path.to_string_lossy().into_owned()),
-        owned_file_count,
-        cars: car_status.into_values().collect(),
+    reconcile_car(state, &root, car_folder)?;
+    Ok(fs::read_to_string(&master_path)?)
+}
+
+pub fn read_master_document(state: &AppState, car_folder: &str) -> AppResult<SetupDocument> {
+    let content = get_master_content(state, car_folder)?;
+    let root = effective_root(state)?;
+    let master_path = car_master_path(&root.join(car_folder));
+
+    Ok(SetupDocument {
+        kind: DocumentKind::Global,
+        id: master_path.to_string_lossy().into_owned(),
+        title: format!("{} — Global Setup", prettify(car_folder)),
+        content,
+        read_only: false,
+        dirty: false,
+        source_label: "Car global setup — applies to every track for this car".to_owned(),
+        remote_download: None,
+        car_folder: Some(car_folder.to_owned()),
     })
 }
 
-pub fn enable(state: &AppState) -> AppResult<()> {
-    if load_meta(&state.db_path)?.feature_enabled {
-        return Err(AppError::from("The global setup feature is already enabled."));
-    }
-
-    let root = effective_root(state)?;
-    let master_path = master_path_for_root(&root);
-    let master_existed = master_path.exists();
-    let previous_master = if master_existed {
-        Some(stage_file(state, &fs::read_to_string(&master_path)?)?)
-    } else {
-        None
-    };
-
-    if !master_existed {
-        fs::write(&master_path, DEFAULT_BASELINE_SETUP)?;
-    }
-    let master_content = fs::read_to_string(&master_path)?;
-    let master_hash = hash_content(&master_content);
-    set_feature_enabled(&state.db_path, true)?;
-    set_master_hash(&state.db_path, &master_hash)?;
-    clear_sync_rows(&state.db_path)?;
-
-    let combos = collect_combos(&root)?;
-    let content_staged = stage_file(state, &master_content)?;
-    let mut undo_paths = Vec::new();
-    let mut undo_staged = Vec::new();
-    let mut combo_keys = Vec::new();
-    for combo in &combos {
-        undo_paths.push(combo.owned_path.clone());
-        if combo.owned_path.exists() {
-            undo_staged.push(Some(stage_file(
-                state,
-                &fs::read_to_string(&combo.owned_path)?,
-            )?));
-        } else {
-            undo_staged.push(None);
-        }
-        combo_keys.push((combo.car_folder.clone(), combo.track_folder.clone()));
-    }
-
-    for combo in &combos {
-        fs::write(&combo.owned_path, &master_content)?;
-    }
-    upsert_sync_rows(&state.db_path, &combo_keys, &master_hash)?;
-    state.undo_manager()?.push(UndoOperation::GlobalSync {
-        mode: GlobalSyncMode::Enable,
-        paths: undo_paths,
-        staged_paths: undo_staged,
-        content_staged,
-        master_path,
-        master_staged: previous_master,
-    });
-
-    Ok(())
-}
-
-pub fn disable(state: &AppState) -> AppResult<()> {
-    if !load_meta(&state.db_path)?.feature_enabled {
-        return Err(AppError::from("The global setup feature is not enabled."));
-    }
-
-    let root = effective_root(state)?;
-    let master_path = master_path_for_root(&root);
-    let rows = load_sync_rows(&state.db_path)?;
-    let mut undo_paths = Vec::new();
-    let mut undo_staged = Vec::new();
-    for (car_folder, track_folder, _) in &rows {
-        let owned_path = root.join(car_folder).join(track_folder).join(MASTER_FILE_NAME);
-        undo_paths.push(owned_path.clone());
-        if owned_path.exists() {
-            undo_staged.push(Some(stage_file(state, &fs::read_to_string(&owned_path)?)?));
-        } else {
-            undo_staged.push(None);
-        }
-    }
-
-    let master_staged = if master_path.exists() {
-        Some(stage_file(state, &fs::read_to_string(&master_path)?)?)
-    } else {
-        None
-    };
-    let content_staged = state.new_staged_file_path("global")?;
-    fs::write(&content_staged, "{}\n")?;
-
-    for path in &undo_paths {
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
-    }
-    if master_path.exists() {
-        fs::remove_file(&master_path)?;
-    }
-    clear_sync_rows(&state.db_path)?;
-    set_feature_enabled(&state.db_path, false)?;
-
-    state.undo_manager()?.push(UndoOperation::GlobalSync {
-        mode: GlobalSyncMode::Disable,
-        paths: undo_paths,
-        staged_paths: undo_staged,
-        content_staged,
-        master_path,
-        master_staged,
-    });
-
-    Ok(())
-}
-
-pub fn push(state: &AppState) -> AppResult<usize> {
-    let meta = load_meta(&state.db_path)?;
-    if !meta.feature_enabled {
-        return Err(AppError::from("The global setup feature is not enabled."));
-    }
-
-    let root = effective_root(state)?;
-    let master_content = read_master(&root)
-        .ok_or_else(|| AppError::from("The global setup master file is missing."))?;
-    let master_hash = hash_content(&master_content);
-
-    let combos = collect_combos(&root)?;
-    let content_staged = stage_file(state, &master_content)?;
-    let mut undo_paths = Vec::new();
-    let mut undo_staged = Vec::new();
-    let mut combo_keys = Vec::new();
-    for combo in &combos {
-        undo_paths.push(combo.owned_path.clone());
-        combo_keys.push((combo.car_folder.clone(), combo.track_folder.clone()));
-    }
-
-    let mut previous_contents = Vec::new();
-    for combo in &combos {
-        previous_contents.push(if combo.owned_path.exists() {
-            fs::read_to_string(&combo.owned_path)?
-        } else {
-            String::new()
-        });
-    }
-    let all_identical = previous_contents.windows(2).all(|pair| pair[0] == pair[1]);
-    if all_identical && !previous_contents.is_empty() {
-        undo_staged.push(Some(stage_file(state, &previous_contents[0])?));
-    } else {
-        for (index, content) in previous_contents.iter().enumerate() {
-            if combos[index].owned_path.exists() {
-                undo_staged.push(Some(stage_file(state, content)?));
-            } else {
-                undo_staged.push(None);
-            }
-        }
-    }
-
-    for combo in &combos {
-        fs::write(&combo.owned_path, &master_content)?;
-    }
-    set_master_hash(&state.db_path, &master_hash)?;
-    upsert_sync_rows(&state.db_path, &combo_keys, &master_hash)?;
-    state.undo_manager()?.push(UndoOperation::GlobalSync {
-        mode: GlobalSyncMode::FanOut,
-        paths: undo_paths,
-        staged_paths: undo_staged,
-        content_staged,
-        master_path: master_path_for_root(&root),
-        master_staged: None,
-    });
-
-    Ok(combos.len())
-}
-
-pub fn save_master(state: &AppState, content: &str) -> AppResult<()> {
-    let meta = load_meta(&state.db_path)?;
-    if !meta.feature_enabled {
-        return Err(AppError::from("The global setup feature is not enabled."));
-    }
-
-    let root = effective_root(state)?;
-    let master_path = master_path_for_root(&root);
-    if !master_path.exists() {
-        return Err(AppError::from(
-            "The global setup master file is missing. Recover it before editing.",
-        ));
-    }
-
+/// Saves new content as a car's master and immediately fans it out to every
+/// track folder for that car (per-car global setup has no separate push step).
+pub fn save_master(state: &AppState, car_folder: &str, content: &str) -> AppResult<()> {
     serde_json::from_str::<serde_json::Value>(content)?;
-    fs::write(&master_path, content)?;
+
+    let root = effective_root(state)?;
+    let car_path = root.join(car_folder);
+    if !car_path.is_dir() {
+        return Err(AppError::from("The selected car folder no longer exists."));
+    }
+
+    fs::write(car_master_path(&car_path), content)?;
+    fan_out_car(state, &root, car_folder, content)?;
     Ok(())
 }
 
-pub fn adopt(state: &AppState, source_path: &Path) -> AppResult<()> {
-    let meta = load_meta(&state.db_path)?;
-    if !meta.feature_enabled {
-        return Err(AppError::from("The global setup feature is not enabled."));
-    }
-
+/// Replaces a car's master with the content of an existing setup file, then fans
+/// it out. Used by the "Set as this car's global setup" context action.
+pub fn adopt(state: &AppState, car_folder: &str, source_path: &Path) -> AppResult<()> {
     if !source_path.is_file() {
         return Err(AppError::from("The selected setup file must be a file."));
     }
@@ -630,91 +214,142 @@ pub fn adopt(state: &AppState, source_path: &Path) -> AppResult<()> {
     }
 
     let content = fs::read_to_string(source_path)?;
-    serde_json::from_str::<serde_json::Value>(&content)?;
-    let root = effective_root(state)?;
-    fs::write(master_path_for_root(&root), content)?;
-    Ok(())
+    save_master(state, car_folder, &content)
 }
 
-pub fn reconcile(state: &AppState) -> AppResult<()> {
-    let meta = load_meta(&state.db_path)?;
-    if !meta.feature_enabled {
+/// Migrates state left over from the old fleet-wide global setup: deletes the old
+/// root-level master and every owned copy it fanned out, then drops its tables.
+/// Runs once at startup, before per-car reconciliation.
+fn migrate_legacy_state(state: &AppState) -> AppResult<()> {
+    let connection = open_connection(&state.db_path)?;
+    let has_legacy_table: bool = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'global_meta'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+
+    if !has_legacy_table {
         return Ok(());
     }
 
-    let root = match effective_root(state) {
-        Ok(root) => root,
-        Err(_) => return Ok(()),
-    };
-    let master_content = match read_master(&root) {
-        Some(content) => content,
-        None => return Ok(()),
+    log::info!("global setup: migrating legacy fleet-wide state to per-car setups");
+
+    if let Ok(root) = effective_root(state) {
+        let legacy_master = root.join(MASTER_FILE_NAME);
+        if legacy_master.is_file() {
+            let _ = fs::remove_file(&legacy_master);
+        }
+
+        let mut statement = connection
+            .prepare("SELECT car_folder, track_folder FROM global_sync_state")?;
+        let legacy_rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+
+        for (car_folder, track_folder) in legacy_rows {
+            let owned_path = root.join(&car_folder).join(&track_folder).join(MASTER_FILE_NAME);
+            if owned_path.is_file() {
+                let _ = fs::remove_file(&owned_path);
+            }
+        }
+    }
+
+    connection.execute("DELETE FROM global_sync_state", [])?;
+    connection.execute("DROP TABLE IF EXISTS global_meta", [])?;
+    Ok(())
+}
+
+/// Self-healing per-car reconciliation: recreates a missing master from the
+/// baseline/skeleton, promotes the newest diverged owned copy (an in-game edit)
+/// to master, and restores/creates owned copies for missing or brand-new track
+/// folders. All car-scoped; other cars are never touched.
+fn reconcile_car(state: &AppState, root: &Path, car_folder: &str) -> AppResult<bool> {
+    let car_path = root.join(car_folder);
+    let master_path = car_master_path(&car_path);
+
+    let master_content = match fs::read_to_string(&master_path) {
+        Ok(content) => content,
+        Err(_) => {
+            let content = seed_content_for(car_folder);
+            fs::write(&master_path, &content)?;
+            fan_out_car(state, root, car_folder, &content)?;
+            log::info!("global setup: seeded master for '{car_folder}'");
+            return Ok(true);
+        }
     };
     let master_hash = hash_content(&master_content);
 
-    let rows = load_sync_rows(&state.db_path)?;
+    let rows = load_sync_rows_for_car(&state.db_path, car_folder)?;
     let mut diverged: Vec<(PathBuf, String, SystemTime)> = Vec::new();
-    let mut missing: Vec<(String, String)> = Vec::new();
-    for (car_folder, track_folder, synced_hash) in rows {
-        let owned_path = root.join(&car_folder).join(&track_folder).join(MASTER_FILE_NAME);
-        if !owned_path.exists() {
-            missing.push((car_folder, track_folder));
-            continue;
-        }
-
-        let content = fs::read_to_string(&owned_path)?;
+    let mut any_missing = false;
+    for (track_folder, synced_hash) in &rows {
+        let owned_path = car_path.join(track_folder).join(MASTER_FILE_NAME);
+        let content = match fs::read_to_string(&owned_path) {
+            Ok(content) => content,
+            Err(_) => {
+                any_missing = true;
+                continue;
+            }
+        };
         let content_hash = hash_content(&content);
-        if content_hash == master_hash || content_hash == synced_hash {
+        if content_hash == master_hash || &content_hash == synced_hash {
             continue;
         }
-
         let mtime = fs::metadata(&owned_path)?
             .modified()
             .unwrap_or(SystemTime::UNIX_EPOCH);
         diverged.push((owned_path, content, mtime));
     }
 
-    if let Some((_, winner_content, _)) = diverged
-        .iter()
-        .max_by_key(|(_, _, mtime)| *mtime)
+    if let Some((winner_path, winner_content, _)) =
+        diverged.iter().max_by_key(|(_, _, mtime)| *mtime)
     {
         log::info!(
-            "global setup: promoting in-game edit from '{}' (newest of {} diverged copies)",
-            diverged[0].0.display(),
+            "global setup: promoting in-game edit for '{car_folder}' from '{}' ({} diverged)",
+            winner_path.display(),
             diverged.len()
         );
-        fs::write(master_path_for_root(&root), winner_content)?;
-        let winner_hash = hash_content(winner_content);
-        set_master_hash(&state.db_path, &winner_hash)?;
-        push(state)?;
-        return Ok(());
+        fs::write(&master_path, winner_content)?;
+        fan_out_car(state, root, car_folder, winner_content)?;
+        return Ok(true);
     }
 
-    let mut restored = 0usize;
-    for (car_folder, track_folder) in missing {
-        let owned_path = root.join(&car_folder).join(&track_folder).join(MASTER_FILE_NAME);
-        if let Some(parent) = owned_path.parent() {
-            fs::create_dir_all(parent)?;
+    if any_missing {
+        fan_out_car(state, root, car_folder, &master_content)?;
+        return Ok(true);
+    }
+
+    // Catches brand-new track folders that have no sync row yet.
+    let current_track_folders = collect_car_track_folders(&car_path)?;
+    if current_track_folders.len() != rows.len() {
+        fan_out_car(state, root, car_folder, &master_content)?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+/// Startup pass: migrates any leftover fleet-wide state, then reconciles every
+/// car folder currently on disk (creating a master + full fan-out for any car
+/// that does not have one yet).
+pub fn reconcile(state: &AppState) -> AppResult<()> {
+    migrate_legacy_state(state)?;
+
+    let root = match effective_root(state) {
+        Ok(root) => root,
+        Err(_) => return Ok(()),
+    };
+
+    for car_folder in sorted_car_folders(&root)? {
+        if let Err(error) = reconcile_car(state, &root, &car_folder) {
+            log::error!("global setup: reconciliation failed for '{car_folder}': {error}");
         }
-        fs::write(&owned_path, &master_content)?;
-        upsert_sync_rows(&state.db_path, &[(car_folder, track_folder)], &master_hash)?;
-        restored += 1;
-    }
-    if restored > 0 {
-        log::info!("global setup: restored {restored} missing owned files at startup");
-    }
-
-    if meta.master_hash.as_deref() != Some(master_hash.as_str()) {
-        set_master_hash(&state.db_path, &master_hash)?;
     }
 
     Ok(())
-}
-
-fn stage_file(state: &AppState, content: &str) -> AppResult<PathBuf> {
-    let staged_path = state.new_staged_file_path("global")?;
-    fs::write(&staged_path, content)?;
-    Ok(staged_path)
 }
 
 fn prettify(value: &str) -> String {
@@ -775,184 +410,176 @@ pub fn spawn_watcher(app_handle: AppHandle) {
     });
 }
 
+/// Determines which car folder (if any) an event path belongs to, and whether the
+/// path itself is relevant (a car's master file, an owned copy, or a car/track
+/// folder being created).
+fn affected_car_folder(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let mut components = relative.components();
+    let car_component = components.next()?;
+    let car_folder = car_component.as_os_str().to_string_lossy().into_owned();
+
+    match components.next() {
+        // {root}/{car} — a car folder itself was created/removed.
+        None => Some(car_folder),
+        // {root}/{car}/{...} — the master file, an owned copy, or a new track folder.
+        Some(_) => {
+            if components.next().is_some() {
+                // Deeper than {car}/{track-or-file}; not something we track.
+                return None;
+            }
+            let is_master_or_owned = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(|name| name.eq_ignore_ascii_case(MASTER_FILE_NAME))
+                .unwrap_or(false);
+            if is_master_or_owned || path.is_dir() {
+                Some(car_folder)
+            } else {
+                None
+            }
+        }
+    }
+}
+
 fn handle_watcher_batch(
     app_handle: &AppHandle,
     root: &Path,
     batch: &[Result<notify::Event, notify::Error>],
 ) -> AppResult<()> {
     let state = app_handle.state::<AppState>();
-    let meta = load_meta(&state.db_path)?;
-    if !meta.feature_enabled {
-        return Ok(());
-    }
 
-    let master_path = master_path_for_root(root);
-    let master_content = read_master(root);
-    let master_hash = master_content.as_deref().map(hash_content);
-
-    let mut promotion_candidates: Vec<PathBuf> = Vec::new();
-    let mut restore_candidates: Vec<PathBuf> = Vec::new();
-    let mut new_car_folders: Vec<PathBuf> = Vec::new();
-    let mut state_changed = false;
-
+    let mut affected_cars: Vec<String> = Vec::new();
     for event in batch.iter().flatten() {
         for path in event.paths.iter().map(PathBuf::as_path) {
-            if path == master_path {
-                state_changed = true;
-                continue;
-            }
-            if !is_reserved_setup_path(path) {
-                continue;
-            }
-
-            match event.kind {
-                notify::EventKind::Remove(_) => {
-                    restore_candidates.push(path.to_path_buf());
-                    state_changed = true;
-                }
-                notify::EventKind::Create(_)
-                | notify::EventKind::Modify(_)
-                | notify::EventKind::Access(_) => {
-                    if path.is_file() {
-                        promotion_candidates.push(path.to_path_buf());
-                        state_changed = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        if let notify::EventKind::Create(_) = event.kind {
-            for path in event.paths.iter().map(PathBuf::as_path) {
-                if path.is_dir() && path.parent() == Some(root) {
-                    new_car_folders.push(path.to_path_buf());
-                    state_changed = true;
+            if let Some(car_folder) = affected_car_folder(root, path) {
+                if !affected_cars.contains(&car_folder) {
+                    affected_cars.push(car_folder);
                 }
             }
         }
     }
 
-    let mut promoted = false;
-    if !promotion_candidates.is_empty() {
-        let mut diverged: Vec<(PathBuf, String, SystemTime)> = Vec::new();
-        for path in promotion_candidates {
-            let content = match fs::read_to_string(&path) {
-                Ok(content) => content,
-                Err(_) => continue,
-            };
-            let content_hash = hash_content(&content);
-            if Some(&content_hash) == master_hash.as_ref() {
-                continue;
-            }
-            let synced_hash = synced_hash_for(&state.db_path, root, &path);
-            if Some(&content_hash) == synced_hash.as_ref() {
-                continue;
-            }
-
-            let mtime = fs::metadata(&path)?
-                .modified()
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            diverged.push((path, content, mtime));
+    let mut changed = false;
+    for car_folder in affected_cars {
+        let car_path = root.join(&car_folder);
+        if !car_path.is_dir() {
+            // The car folder itself was removed; nothing to reconcile.
+            continue;
         }
-
-        if let Some((winner_path, winner_content, _)) = diverged
-            .iter()
-            .max_by_key(|(_, _, mtime)| *mtime)
-        {
-            log::info!(
-                "global setup: promoting in-game edit from '{}' (newest of {} diverged copies)",
-                winner_path.display(),
-                diverged.len()
-            );
-            fs::write(master_path_for_root(root), winner_content)?;
-            promoted = true;
+        match reconcile_car(&state, root, &car_folder) {
+            Ok(did_change) => changed = changed || did_change,
+            Err(error) => {
+                log::error!("global setup: watcher reconciliation failed for '{car_folder}': {error}");
+            }
         }
     }
 
-    if promoted {
-        push(&state)?;
-        state_changed = true;
-    } else if master_content.is_some() {
-        let mut restored = 0usize;
-        for path in &restore_candidates {
-            if let Err(error) = fs::write(path, master_content.as_deref().unwrap_or_default()) {
-                log::error!(
-                    "global setup: failed to restore '{}': {error}",
-                    path.display()
-                );
-            } else {
-                restored += 1;
-            }
-        }
-        if restored > 0 {
-            log::info!("global setup: restored {restored} deleted owned files from master");
-            state_changed = true;
-        }
-    }
-
-    for car_path in new_car_folders {
-        if car_path.is_dir() {
-            log::info!(
-                "global setup: new car folder '{}' detected, creating track set",
-                car_path.display()
-            );
-            push(&state)?;
-            state_changed = true;
-        }
-    }
-
-    if state_changed {
-        if let Err(error) = app_handle.emit(GLOBAL_SETUP_CHANGED_EVENT, ()) {
-            log::error!("failed to emit global setup state change: {error}");
-        }
+    if changed {
+        emit_state_changed(app_handle);
     }
 
     Ok(())
 }
 
-fn synced_hash_for(db_path: &Path, root: &Path, owned_path: &Path) -> Option<String> {
-    let car_folder = owned_path.parent()?.parent()?.file_name()?;
-    let track_folder = owned_path.parent()?.file_name()?;
-    let _ = root;
-    let connection = Connection::open(db_path).ok()?;
-    connection
-        .query_row(
-            "SELECT synced_hash FROM global_sync_state WHERE car_folder = ?1 AND track_folder = ?2",
-            params![
-                car_folder.to_string_lossy().into_owned(),
-                track_folder.to_string_lossy().into_owned()
-            ],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .ok()
-        .flatten()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{is_reserved_setup_path, is_reserved_setup_stem, DEFAULT_BASELINE_SETUP};
-    use std::path::Path;
+    use super::{
+        affected_car_folder, car_master_path, collect_car_track_folders, is_reserved_setup_path,
+        is_reserved_setup_stem, MASTER_FILE_NAME,
+    };
+    use crate::services::filesystem::KNOWN_ACC_TRACK_FOLDER_NAMES;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use uuid::Uuid;
 
-    #[test]
-    fn recognizes_reserved_stem_case_insensitively() {
-        assert!(is_reserved_setup_stem("Acc Manager Global Setup"));
-        assert!(is_reserved_setup_stem("ACC MANAGER GLOBAL SETUP"));
-        assert!(!is_reserved_setup_stem("race setup"));
+    fn create_temp_dir() -> PathBuf {
+        let path = std::env::temp_dir().join(format!("global-setup-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).expect("create temp dir");
+        path
     }
 
     #[test]
-    fn recognizes_reserved_paths() {
+    fn reserved_stem_check_is_case_insensitive() {
+        assert!(is_reserved_setup_stem("ACC Manager Global Setup"));
+        assert!(is_reserved_setup_stem("acc manager global setup"));
+        assert!(!is_reserved_setup_stem("copilot_fast"));
         assert!(is_reserved_setup_path(Path::new(
-            "C:/Setups/bmw_m4_gt3/monza/ACC Manager Global Setup.json"
-        )));
-        assert!(!is_reserved_setup_path(Path::new(
-            "C:/Setups/bmw_m4_gt3/monza/race.json"
+            "C:/Setups/bmw_m4_gt3/spa/acc manager global setup.json"
         )));
     }
 
     #[test]
-    fn default_baseline_is_valid_json() {
-        serde_json::from_str::<serde_json::Value>(DEFAULT_BASELINE_SETUP).expect("valid baseline");
+    fn car_master_path_sits_directly_in_the_car_folder() {
+        let car_path = Path::new("C:/Setups/bmw_m4_gt3");
+        assert_eq!(
+            car_master_path(car_path),
+            car_path.join(MASTER_FILE_NAME)
+        );
+    }
+
+    #[test]
+    fn collect_car_track_folders_creates_known_tracks_and_keeps_existing_ones() {
+        let temp_dir = create_temp_dir();
+        let car_path = temp_dir.join("bmw_m4_gt3");
+        fs::create_dir_all(car_path.join("a_custom_track")).expect("create custom track");
+
+        let track_folders = collect_car_track_folders(&car_path).expect("collect track folders");
+
+        for known in KNOWN_ACC_TRACK_FOLDER_NAMES {
+            assert!(
+                track_folders.iter().any(|name| name == known),
+                "missing known track '{known}'"
+            );
+            assert!(car_path.join(known).is_dir());
+        }
+        assert!(track_folders.iter().any(|name| name == "a_custom_track"));
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn collect_car_track_folders_is_case_insensitive_for_existing_folders() {
+        let temp_dir = create_temp_dir();
+        let car_path = temp_dir.join("bmw_m4_gt3");
+        fs::create_dir_all(car_path.join("Spa")).expect("create capitalized track");
+
+        let track_folders = collect_car_track_folders(&car_path).expect("collect track folders");
+        let spa_entries: Vec<_> = track_folders
+            .iter()
+            .filter(|name| name.eq_ignore_ascii_case("spa"))
+            .collect();
+        assert_eq!(spa_entries, vec!["Spa"], "should not duplicate case-variant tracks");
+
+        fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn affected_car_folder_scopes_events_to_the_owning_car() {
+        let root = Path::new("C:/Setups");
+
+        // A brand new car folder.
+        assert_eq!(
+            affected_car_folder(root, &root.join("bmw_m4_gt3")),
+            Some("bmw_m4_gt3".to_owned())
+        );
+
+        // The car's own master file.
+        assert_eq!(
+            affected_car_folder(
+                root,
+                &root.join("bmw_m4_gt3").join(MASTER_FILE_NAME)
+            ),
+            Some("bmw_m4_gt3".to_owned())
+        );
+
+        // A non-reserved file directly in the car folder is irrelevant.
+        assert_eq!(
+            affected_car_folder(root, &root.join("bmw_m4_gt3").join("notes.txt")),
+            None
+        );
+
+        // Paths outside the root are irrelevant.
+        assert_eq!(affected_car_folder(root, Path::new("D:/Elsewhere/file.json")), None);
     }
 }

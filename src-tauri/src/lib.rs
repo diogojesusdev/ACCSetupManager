@@ -156,10 +156,7 @@ pub fn run() {
             commands::read_remote_setup_document,
             commands::download_remote_setup,
             commands::download_remote_setup_to_tracks,
-            commands::global_setup_get_state,
-            commands::global_setup_enable,
-            commands::global_setup_disable,
-            commands::global_setup_push,
+            commands::global_setup_read_master,
             commands::global_setup_adopt,
             commands::global_setup_save_master,
         ])

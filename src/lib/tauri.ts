@@ -4,7 +4,6 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import type {
   AppBootstrap,
-  GlobalSetupState,
   LocalSetup,
   MutationResult,
   RemoteSourceResult,
@@ -126,28 +125,22 @@ export async function downloadRemoteSetupToTracks(args: {
   return invoke<MutationResult>('download_remote_setup_to_tracks', args)
 }
 
-export async function loadGlobalSetupState(): Promise<GlobalSetupState> {
-  return invoke<GlobalSetupState>('global_setup_get_state')
+export async function readCarGlobalSetup(carFolder: string): Promise<SetupDocument> {
+  return invoke<SetupDocument>('global_setup_read_master', { carFolder })
 }
 
-export async function enableGlobalSetup(): Promise<MutationResult> {
-  return invoke<MutationResult>('global_setup_enable')
+export async function adoptGlobalSetup(
+  carFolder: string,
+  sourcePath: string,
+): Promise<MutationResult> {
+  return invoke<MutationResult>('global_setup_adopt', { carFolder, sourcePath })
 }
 
-export async function disableGlobalSetup(): Promise<MutationResult> {
-  return invoke<MutationResult>('global_setup_disable')
-}
-
-export async function pushGlobalSetup(): Promise<MutationResult> {
-  return invoke<MutationResult>('global_setup_push')
-}
-
-export async function adoptGlobalSetup(sourcePath: string): Promise<MutationResult> {
-  return invoke<MutationResult>('global_setup_adopt', { sourcePath })
-}
-
-export async function saveGlobalSetupMaster(content: string): Promise<MutationResult> {
-  return invoke<MutationResult>('global_setup_save_master', { content })
+export async function saveGlobalSetupMaster(
+  carFolder: string,
+  content: string,
+): Promise<MutationResult> {
+  return invoke<MutationResult>('global_setup_save_master', { carFolder, content })
 }
 
 export async function chooseDirectory(): Promise<string | null> {

@@ -1,8 +1,6 @@
 # ADR 0001: ACC Manager Global Setup — owned-file sync architecture
 
-**Status:** Accepted
-**Date:** 2026-09-05
-**Feature spec:** `../global-setup-spec.md`
+**Status:** Superseded by `adr/0002-per-car-global-setup.md` (2026-09-05). Kept for history only.
 
 ## Context
 

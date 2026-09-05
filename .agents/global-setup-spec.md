@@ -1,8 +1,6 @@
 # Feature Spec: ACC Manager Global Setup
 
-**Status:** Agreed (post-grilling), not yet implemented
-**Date:** 2026-09-05
-**Related:** `adr/0001-global-setup-sync.md`, `prd.md`
+**Status:** Superseded by `per-car-global-setup-plan.md` and `adr/0002-per-car-global-setup.md` (2026-09-05). Kept for history only — the fleet-wide single master described below was replaced by one master per car before this ever shipped.
 
 ## Summary
 

@@ -19,6 +19,7 @@ const sampleBootstrap: AppBootstrap = {
         displayName: 'Bmw M4 Gt3',
         absolutePath: 'C:\\ACC\\Setups\\bmw-m4-gt3',
         trackCount: 3,
+        globalSetupPath: 'C:\\ACC\\Setups\\bmw-m4-gt3\\acc manager global setup.json',
       },
     ],
     tracks: [

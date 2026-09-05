@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AppBootstrap, GlobalSetupState, LocalSetup, MutationResult, RemoteSourceResult, SetupDocument,
+    AppBootstrap, LocalSetup, MutationResult, RemoteSourceResult, SetupDocument,
 };
 use crate::services::filesystem;
 use crate::services::global_setup;
@@ -258,42 +258,29 @@ pub fn download_remote_setup_to_tracks(
 }
 
 #[tauri::command]
-pub fn global_setup_get_state(state: State<'_, AppState>) -> AppResult<GlobalSetupState> {
-    global_setup::get_state(&state)
-}
-
-#[tauri::command]
-pub fn global_setup_enable(state: State<'_, AppState>) -> AppResult<MutationResult> {
-    global_setup::enable(&state)?;
-    filesystem::mutation_result(&state, None)
-}
-
-#[tauri::command]
-pub fn global_setup_disable(state: State<'_, AppState>) -> AppResult<MutationResult> {
-    global_setup::disable(&state)?;
-    filesystem::mutation_result(&state, None)
-}
-
-#[tauri::command]
-pub fn global_setup_push(state: State<'_, AppState>) -> AppResult<MutationResult> {
-    global_setup::push(&state)?;
-    filesystem::mutation_result(&state, None)
+pub fn global_setup_read_master(
+    state: State<'_, AppState>,
+    car_folder: String,
+) -> AppResult<SetupDocument> {
+    global_setup::read_master_document(&state, &car_folder)
 }
 
 #[tauri::command]
 pub fn global_setup_adopt(
     state: State<'_, AppState>,
+    car_folder: String,
     source_path: String,
 ) -> AppResult<MutationResult> {
-    global_setup::adopt(&state, PathBuf::from(source_path).as_path())?;
+    global_setup::adopt(&state, &car_folder, PathBuf::from(source_path).as_path())?;
     filesystem::mutation_result(&state, None)
 }
 
 #[tauri::command]
 pub fn global_setup_save_master(
     state: State<'_, AppState>,
+    car_folder: String,
     content: String,
 ) -> AppResult<MutationResult> {
-    global_setup::save_master(&state, &content)?;
+    global_setup::save_master(&state, &car_folder, &content)?;
     filesystem::mutation_result(&state, None)
 }

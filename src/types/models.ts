@@ -13,6 +13,7 @@ export interface Car {
   displayName: string
   absolutePath: string
   trackCount: number
+  globalSetupPath: string
 }
 
 export interface Track {
@@ -58,7 +59,7 @@ export interface MutationResult {
 }
 
 export interface SetupDocument {
-  kind: 'local' | 'remote'
+  kind: 'local' | 'remote' | 'global'
   id: string
   title: string
   content: string
@@ -66,6 +67,8 @@ export interface SetupDocument {
   dirty: boolean
   sourceLabel: string
   remoteDownload?: RemoteDownloadDescriptor
+  /** Set when `kind` is `'global'`: the car folder this master belongs to. */
+  carFolder?: string
 }
 
 export interface RemoteDownloadDescriptor {
@@ -101,22 +104,4 @@ export interface RemoteSourceResult {
   items: RemoteSetup[]
   stale: boolean
   message: string
-}
-
-export type GlobalSetupStatus = 'disabled' | 'no_master' | 'master_modified' | 'synced'
-
-export interface GlobalSetupCarStatus {
-  carFolder: string
-  displayName: string
-  inSync: number
-  missing: number
-  diverged: number
-}
-
-export interface GlobalSetupState {
-  featureEnabled: boolean
-  status: GlobalSetupStatus
-  masterPath: string | null
-  ownedFileCount: number
-  cars: GlobalSetupCarStatus[]
 }

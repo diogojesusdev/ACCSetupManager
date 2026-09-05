@@ -38,6 +38,7 @@ import {
   IconExternalLink,
   IconFolder,
   IconFolderOpen,
+  IconGlobe,
   IconMapPin,
   IconMinus,
   IconPencil,
@@ -58,6 +59,7 @@ import {
   closeCurrentWindow,
   chooseDirectory,
   chooseImportFile,
+  adoptGlobalSetup,
   copyLocalSetupToTracks,
   createLocalSetup,
   deleteLocalSetup,
@@ -67,10 +69,12 @@ import {
   loadAppBootstrap,
   minimizeCurrentWindow,
   openExternal,
+  readCarGlobalSetup,
   readRemoteSetupDocument,
   readSetupDocument,
   redoLastOperation,
   renameLocalSetup,
+  saveGlobalSetupMaster,
   saveLocalSetup,
   setManualSetupRoot,
   startDraggingCurrentWindow,
@@ -87,7 +91,6 @@ import {
 } from './lib/setup-list'
 import { loadCachedBootstrap, saveCachedBootstrap } from './lib/bootstrap-cache'
 import { useAppStore } from './state/app-store'
-import { GlobalSetupView } from './GlobalSetupView'
 import type { AppBootstrap, LocalSetup, MutationResult, RemoteSetup } from './types/models'
 
 const bootstrapQueryKey = ['bootstrap']
@@ -188,7 +191,6 @@ function App() {
     activeRemoteSourceId,
     selectedRemoteSetupIds,
     remoteFilters,
-    activeView,
     openDocument,
     setSelectedCarId,
     setSelectedTrackId,
@@ -202,7 +204,6 @@ function App() {
     updateOpenDocumentContent,
     markOpenDocumentSaved,
     closeOpenDocument,
-    setActiveView,
   } = useAppStore()
 
   const bootstrapQuery = useQuery({
@@ -369,6 +370,15 @@ function App() {
     }
   }
 
+  const openGlobalSetupInEditor = async (carFolder: string) => {
+    try {
+      const document = await readCarGlobalSetup(carFolder)
+      openDocumentPane(document)
+    } catch (error) {
+      showError("Couldn't open the global setup", error)
+    }
+  }
+
   const createMutation = useMutation({
     mutationFn: ({ trackPath, fileName }: { trackPath: string; fileName: string }) =>
       createLocalSetup(trackPath, fileName),
@@ -401,8 +411,15 @@ function App() {
   })
 
   const saveMutation = useMutation({
-    mutationFn: ({ path, content }: { path: string; content: string }) =>
-      saveLocalSetup(path, content),
+    mutationFn: ({
+      path,
+      content,
+      carFolder,
+    }: {
+      path: string
+      content: string
+      carFolder?: string
+    }) => (carFolder ? saveGlobalSetupMaster(carFolder, content) : saveLocalSetup(path, content)),
     onSuccess: (result) => {
       applyMutationResult(result, 'Changes saved.')
       if (openDocument) {
@@ -410,6 +427,15 @@ function App() {
       }
     },
     onError: (error) => showError("Couldn't save your changes", error),
+  })
+
+  const adoptGlobalSetupMutation = useMutation({
+    mutationFn: ({ carFolder, sourcePath }: { carFolder: string; sourcePath: string }) =>
+      adoptGlobalSetup(carFolder, sourcePath),
+    onSuccess: (result) => {
+      applyMutationResult(result, "Set as this car's global setup.")
+    },
+    onError: (error) => showError("Couldn't set this as the global setup", error),
   })
 
   const deleteMutation = useMutation({
@@ -868,27 +894,74 @@ function App() {
       </ScrollArea>
     )
 
+  const renderGlobalSetupRow = () => {
+    if (!selectedCar) {
+      return null
+    }
+
+    return (
+      <Paper
+        key="global-setup"
+        radius="sm"
+        p="xs"
+        onClick={() => void openGlobalSetupInEditor(selectedCar.folderName)}
+        tabIndex={0}
+        className="setup-row setup-row--global"
+        style={{ cursor: 'pointer' }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            void openGlobalSetupInEditor(selectedCar.folderName)
+          }
+        }}
+      >
+        <Group justify="space-between" align="center" wrap="nowrap" gap="xs">
+          <Group gap={8} wrap="nowrap">
+            <IconGlobe size={16} />
+            <Stack gap={2}>
+              <Text fw={700}>Global setup</Text>
+              <Text size="xs" c="dimmed">
+                Applies to every track for {selectedCar.displayName}
+              </Text>
+            </Stack>
+          </Group>
+          <Badge variant="light" color="steel">
+            Pinned
+          </Badge>
+        </Group>
+      </Paper>
+    )
+  }
+
   const renderLocalSetupList = (items: LocalSetup[]) => {
+    const globalSetupRow = selectedTrack ? renderGlobalSetupRow() : null
+
     if (!items.length) {
       return (
-        <Group justify="center" align="center" h="100%">
-          <Stack gap={6} align="center">
-            <Text size="sm" fw={600}>
-              {selectedTrack ? 'No saved setups yet' : 'Choose a track to begin'}
-            </Text>
-            <Text size="sm" c="dimmed" ta="center" maw={280}>
-              {selectedTrack
-                ? 'Create a setup, add one from your computer, or browse community setups.'
-                : 'Choose a car and track to see the setups you have saved.'}
-            </Text>
+        <ScrollArea h="100%" type="auto" offsetScrollbars>
+          <Stack gap="xs">
+            {globalSetupRow}
+            <Group justify="center" align="center" mih={160}>
+              <Stack gap={6} align="center">
+                <Text size="sm" fw={600}>
+                  {selectedTrack ? 'No saved setups yet' : 'Choose a track to begin'}
+                </Text>
+                <Text size="sm" c="dimmed" ta="center" maw={280}>
+                  {selectedTrack
+                    ? 'Create a setup, add one from your computer, or browse community setups.'
+                    : 'Choose a car and track to see the setups you have saved.'}
+                </Text>
+              </Stack>
+            </Group>
           </Stack>
-        </Group>
+        </ScrollArea>
       )
     }
 
     return (
       <ScrollArea h="100%" type="auto" offsetScrollbars>
         <Stack gap="xs">
+          {globalSetupRow}
           {items.map((setup) => {
             const selected = setup.id === selectedLocalSetupId
             return (
@@ -930,6 +1003,22 @@ function App() {
                       }}
                     >
                       <IconPencil size={16} />
+                    </IconActionButton>
+                    <IconActionButton
+                      label="Set as this car's global setup"
+                      color="steel"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (!selectedCar) {
+                          return
+                        }
+                        void adoptGlobalSetupMutation.mutateAsync({
+                          carFolder: selectedCar.folderName,
+                          sourcePath: setup.id,
+                        })
+                      }}
+                    >
+                      <IconGlobe size={16} />
                     </IconActionButton>
                     <IconActionButton
                       label="Copy setup to other tracks"
@@ -1344,20 +1433,6 @@ function App() {
               </Alert>
             ) : null}
 
-            <Group justify="flex-start">
-              <SegmentedControl
-                value={activeView}
-                onChange={(value) => setActiveView(value as 'library' | 'global')}
-                data={[
-                  { value: 'library', label: 'Setup library' },
-                  { value: 'global', label: 'Global setup' },
-                ]}
-              />
-            </Group>
-
-            {activeView === 'global' ? (
-              <GlobalSetupView bootstrap={bootstrap} />
-            ) : (
             <Box className="workspace-grid">
               <Card withBorder radius="md" className="surface-card" p="xs">
                 <Stack gap="xs" h="100%">
@@ -1423,7 +1498,6 @@ function App() {
                 </Stack>
               </Card>
             </Box>
-            )}
           </Stack>
         </AppShell.Main>
       </AppShell>
@@ -1485,6 +1559,7 @@ function App() {
                       void saveMutation.mutateAsync({
                         path: openDocument.id,
                         content: openDocument.content,
+                        carFolder: openDocument.carFolder,
                       })
                     }
                     title="Save your changes"

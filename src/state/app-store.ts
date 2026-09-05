@@ -6,8 +6,6 @@ export interface OpenDocumentState extends SetupDocument {
   savedContent: string
 }
 
-type AppView = 'library' | 'global'
-
 interface AppStoreState {
   selectedCarId: string | null
   selectedTrackId: string | null
@@ -18,7 +16,6 @@ interface AppStoreState {
   selectedRemoteSetupIds: Record<string, string | null>
   remoteFilters: Record<string, string>
   openDocument: OpenDocumentState | null
-  activeView: AppView
   setSelectedCarId: (carId: string | null) => void
   setSelectedTrackId: (trackId: string | null) => void
   setSelectedLocalSetupId: (setupId: string | null) => void
@@ -31,7 +28,6 @@ interface AppStoreState {
   updateOpenDocumentContent: (content: string) => void
   markOpenDocumentSaved: (savedContent: string, newId?: string, newTitle?: string) => void
   closeOpenDocument: () => void
-  setActiveView: (view: AppView) => void
 }
 
 export const useAppStore = create<AppStoreState>((set) => ({
@@ -44,7 +40,6 @@ export const useAppStore = create<AppStoreState>((set) => ({
   selectedRemoteSetupIds: {},
   remoteFilters: {},
   openDocument: null,
-  activeView: 'library',
   setSelectedCarId: (selectedCarId) => set({ selectedCarId }),
   setSelectedTrackId: (selectedTrackId) => set({ selectedTrackId }),
   setSelectedLocalSetupId: (selectedLocalSetupId) => set({ selectedLocalSetupId }),
@@ -98,5 +93,4 @@ export const useAppStore = create<AppStoreState>((set) => ({
       }
     }),
   closeOpenDocument: () => set({ openDocument: null }),
-  setActiveView: (activeView) => set({ activeView }),
 }))

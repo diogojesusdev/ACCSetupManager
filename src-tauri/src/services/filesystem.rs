@@ -86,6 +86,7 @@ pub fn read_setup_document(state: &AppState, path: &Path) -> AppResult<SetupDocu
         dirty: false,
         source_label: "Local setup".to_owned(),
         remote_download: None,
+        car_folder: None,
     })
 }
 
@@ -152,7 +153,7 @@ pub fn delete_local_setup(state: &AppState, path: &Path) -> AppResult<(PathBuf, 
     let path = validate_existing_setup_path(state, path)?;
     if crate::services::global_setup::is_reserved_setup_path(&path) {
         return Err(AppError::from(
-            "The ACC Manager global setup cannot be deleted from here. Use the Global Setup view.",
+            "The car's global setup cannot be deleted from here.",
         ));
     }
     let staged_path = state.new_staged_file_path("delete")?;
@@ -314,6 +315,9 @@ fn scan_local_library(settings: &AppSettings) -> AppResult<LocalLibrary> {
             display_name: prettify_name(&car_folder_name),
             absolute_path: path_to_string(&car_path),
             track_count: track_folder_names.len(),
+            global_setup_path: path_to_string(&crate::services::global_setup::car_master_path(
+                &car_path,
+            )),
         });
 
         for (track_key, canonical_name) in &track_folder_names {

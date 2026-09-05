@@ -1,1 +1,1 @@
-- Maybe global setup should actually be per car!
+- Ship real sprint baselines for the remaining ACC GT3/GT4/Cup roster (only the 8 cars the author owns have hand-tuned baselines today; others get a neutral skeleton).

@@ -24,21 +24,6 @@ pub enum UndoOperation {
         original_path: PathBuf,
         staged_path: PathBuf,
     },
-    GlobalSync {
-        mode: GlobalSyncMode,
-        paths: Vec<PathBuf>,
-        staged_paths: Vec<Option<PathBuf>>,
-        content_staged: PathBuf,
-        master_path: PathBuf,
-        master_staged: Option<PathBuf>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GlobalSyncMode {
-    FanOut,
-    Enable,
-    Disable,
 }
 
 #[derive(Debug)]
@@ -97,7 +82,6 @@ impl UndoOperation {
             Self::Copy { .. } => "Undo copy".to_owned(),
             Self::Rename { .. } => "Undo rename".to_owned(),
             Self::Delete { .. } => "Undo delete".to_owned(),
-            Self::GlobalSync { .. } => "Undo global setup sync".to_owned(),
         }
     }
 
@@ -151,46 +135,6 @@ impl UndoOperation {
                 Ok(Self::Delete {
                     original_path,
                     staged_path,
-                })
-            }
-            Self::GlobalSync {
-                mode,
-                paths,
-                staged_paths,
-                content_staged,
-                master_path,
-                master_staged,
-            } => {
-                match mode {
-                    GlobalSyncMode::FanOut => restore_previous_contents(&paths, &staged_paths)?,
-                    GlobalSyncMode::Enable => {
-                        for path in &paths {
-                            if path.exists() {
-                                fs::remove_file(path)?;
-                            }
-                        }
-                        if master_path.exists() {
-                            fs::remove_file(&master_path)?;
-                        }
-                    }
-                    GlobalSyncMode::Disable => {
-                        restore_previous_contents(&paths, &staged_paths)?;
-                        if let Some(master_staged) = &master_staged {
-                            if let Some(parent) = master_path.parent() {
-                                fs::create_dir_all(parent)?;
-                            }
-                            fs::copy(master_staged, &master_path)?;
-                        }
-                    }
-                }
-
-                Ok(Self::GlobalSync {
-                    mode,
-                    paths,
-                    staged_paths,
-                    content_staged,
-                    master_path,
-                    master_staged,
                 })
             }
         }
@@ -248,90 +192,8 @@ impl UndoOperation {
                     staged_path,
                 })
             }
-            Self::GlobalSync {
-                mode,
-                paths,
-                staged_paths,
-                content_staged,
-                master_path,
-                master_staged,
-            } => {
-                match mode {
-                    GlobalSyncMode::FanOut => {
-                        for path in &paths {
-                            if let Some(parent) = path.parent() {
-                                fs::create_dir_all(parent)?;
-                            }
-                            fs::copy(&content_staged, path)?;
-                        }
-                    }
-                    GlobalSyncMode::Enable => {
-                        if let Some(parent) = master_path.parent() {
-                            fs::create_dir_all(parent)?;
-                        }
-                        fs::copy(&content_staged, &master_path)?;
-                        for path in &paths {
-                            if let Some(parent) = path.parent() {
-                                fs::create_dir_all(parent)?;
-                            }
-                            fs::copy(&content_staged, path)?;
-                        }
-                    }
-                    GlobalSyncMode::Disable => {
-                        for path in &paths {
-                            if path.exists() {
-                                fs::remove_file(path)?;
-                            }
-                        }
-                        if master_path.exists() {
-                            fs::remove_file(&master_path)?;
-                        }
-                    }
-                }
-
-                Ok(Self::GlobalSync {
-                    mode,
-                    paths,
-                    staged_paths,
-                    content_staged,
-                    master_path,
-                    master_staged,
-                })
-            }
         }
     }
-}
-
-fn restore_previous_contents(paths: &[PathBuf], staged_paths: &[Option<PathBuf>]) -> AppResult<()> {
-    if staged_paths.len() == 1 && paths.len() > 1 {
-        if let Some(staged) = &staged_paths[0] {
-            for path in paths {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(staged, path)?;
-            }
-        }
-        return Ok(());
-    }
-
-    for (path, staged) in paths.iter().zip(staged_paths.iter()) {
-        match staged {
-            Some(staged) => {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(staged, path)?;
-            }
-            None => {
-                if path.exists() {
-                    fs::remove_file(path)?;
-                }
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn stage_file_copy(

@@ -41,6 +41,7 @@ pub struct Car {
     pub display_name: String,
     pub absolute_path: String,
     pub track_count: usize,
+    pub global_setup_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,6 +98,9 @@ pub struct SetupDocument {
     pub dirty: bool,
     pub source_label: String,
     pub remote_download: Option<RemoteDownloadDescriptor>,
+    /// Set when `kind` is `Global`: the car folder this master belongs to, needed
+    /// to route saves back to the per-car global setup fan-out.
+    pub car_folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -104,6 +108,7 @@ pub struct SetupDocument {
 pub enum DocumentKind {
     Local,
     Remote,
+    Global,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -146,31 +151,3 @@ pub struct RemoteDownloadDescriptor {
     pub source_page_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GlobalSetupState {
-    pub feature_enabled: bool,
-    pub status: GlobalSetupStatus,
-    pub master_path: Option<String>,
-    pub owned_file_count: usize,
-    pub cars: Vec<GlobalSetupCarStatus>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GlobalSetupStatus {
-    Disabled,
-    NoMaster,
-    MasterModified,
-    Synced,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GlobalSetupCarStatus {
-    pub car_folder: String,
-    pub display_name: String,
-    pub in_sync: usize,
-    pub missing: usize,
-    pub diverged: usize,
-}

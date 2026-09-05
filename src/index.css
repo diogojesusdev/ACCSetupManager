@@ -172,6 +172,16 @@ textarea {
   background: rgba(61, 20, 16, 0.45);
 }
 
+.setup-row--global {
+  border-color: rgba(94, 149, 214, 0.32);
+  background: rgba(20, 27, 35, 0.94);
+}
+
+.setup-row--global:hover {
+  border-color: rgba(94, 149, 214, 0.55);
+  background: rgba(24, 32, 41, 0.98);
+}
+
 .setup-row__actions {
   align-self: flex-start;
 }

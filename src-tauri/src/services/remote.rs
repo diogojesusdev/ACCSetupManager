@@ -153,6 +153,7 @@ pub fn read_remote_setup_document(
             suggested_file_name: file_name,
             source_page_url: Some(simply_lovely_source_page_url(remote_setup_id)),
         }),
+        car_folder: None,
     })
 }
 
