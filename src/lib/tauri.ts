@@ -143,6 +143,19 @@ export async function saveGlobalSetupMaster(
   return invoke<MutationResult>('global_setup_save_master', { carFolder, content })
 }
 
+export async function subscribeToGlobalSetupChanges(
+  onChange: () => void,
+): Promise<() => void> {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+    return () => {}
+  }
+
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen('global-setup-state-changed', () => {
+    onChange()
+  })
+}
+
 export async function chooseDirectory(): Promise<string | null> {
   const result = await openDialog({
     directory: true,

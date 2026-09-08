@@ -285,6 +285,7 @@ fn reconcile_car(state: &AppState, root: &Path, car_folder: &str) -> AppResult<b
     let rows = load_sync_rows_for_car(&state.db_path, car_folder)?;
     let mut diverged: Vec<(PathBuf, String, SystemTime)> = Vec::new();
     let mut any_missing = false;
+    let mut any_stale = false;
     for (track_folder, synced_hash) in &rows {
         let owned_path = car_path.join(track_folder).join(MASTER_FILE_NAME);
         let content = match fs::read_to_string(&owned_path) {
@@ -295,7 +296,12 @@ fn reconcile_car(state: &AppState, root: &Path, car_folder: &str) -> AppResult<b
             }
         };
         let content_hash = hash_content(&content);
-        if content_hash == master_hash || &content_hash == synced_hash {
+        if content_hash == master_hash {
+            continue;
+        }
+        // Still matches what we last wrote: not an in-game edit, but behind master.
+        if &content_hash == synced_hash {
+            any_stale = true;
             continue;
         }
         let mtime = fs::metadata(&owned_path)?
@@ -317,7 +323,7 @@ fn reconcile_car(state: &AppState, root: &Path, car_folder: &str) -> AppResult<b
         return Ok(true);
     }
 
-    if any_missing {
+    if any_missing || any_stale {
         fan_out_car(state, root, car_folder, &master_content)?;
         return Ok(true);
     }
@@ -410,35 +416,46 @@ pub fn spawn_watcher(app_handle: AppHandle) {
     });
 }
 
+fn is_master_file_name(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(|name| name.eq_ignore_ascii_case(MASTER_FILE_NAME))
+        .unwrap_or(false)
+}
+
 /// Determines which car folder (if any) an event path belongs to, and whether the
 /// path itself is relevant (a car's master file, an owned copy, or a car/track
 /// folder being created).
 fn affected_car_folder(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let mut components = relative.components();
-    let car_component = components.next()?;
-    let car_folder = car_component.as_os_str().to_string_lossy().into_owned();
+    let car_folder = components.next()?.as_os_str().to_string_lossy().into_owned();
+    let second = components.next();
+    let third = components.next();
+    if components.next().is_some() {
+        return None;
+    }
 
-    match components.next() {
+    match (second, third) {
         // {root}/{car} — a car folder itself was created/removed.
-        None => Some(car_folder),
-        // {root}/{car}/{...} — the master file, an owned copy, or a new track folder.
-        Some(_) => {
-            if components.next().is_some() {
-                // Deeper than {car}/{track-or-file}; not something we track.
-                return None;
-            }
-            let is_master_or_owned = path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .map(|name| name.eq_ignore_ascii_case(MASTER_FILE_NAME))
-                .unwrap_or(false);
-            if is_master_or_owned || path.is_dir() {
+        (None, None) => Some(car_folder),
+        // {root}/{car}/{master.json} or {root}/{car}/{track}
+        (Some(_), None) => {
+            if is_master_file_name(path) || path.is_dir() {
                 Some(car_folder)
             } else {
                 None
             }
         }
+        // {root}/{car}/{track}/acc manager global setup.json — in-game override.
+        (Some(_), Some(_)) => {
+            if is_master_file_name(path) {
+                Some(car_folder)
+            } else {
+                None
+            }
+        }
+        (None, Some(_)) => None,
     }
 }
 
@@ -571,6 +588,27 @@ mod tests {
                 &root.join("bmw_m4_gt3").join(MASTER_FILE_NAME)
             ),
             Some("bmw_m4_gt3".to_owned())
+        );
+
+        // An owned copy in a track folder — this is what ACC overwrites in-game.
+        assert_eq!(
+            affected_car_folder(
+                root,
+                &root
+                    .join("bmw_m4_gt3")
+                    .join("spa")
+                    .join(MASTER_FILE_NAME)
+            ),
+            Some("bmw_m4_gt3".to_owned())
+        );
+
+        // A regular setup in a track folder is irrelevant.
+        assert_eq!(
+            affected_car_folder(
+                root,
+                &root.join("bmw_m4_gt3").join("spa").join("race.json")
+            ),
+            None
         );
 
         // A non-reserved file directly in the car folder is irrelevant.

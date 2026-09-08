@@ -78,6 +78,7 @@ import {
   saveLocalSetup,
   setManualSetupRoot,
   startDraggingCurrentWindow,
+  subscribeToGlobalSetupChanges,
   toggleCurrentWindowMaximize,
   undoLastOperation,
 } from './lib/tauri'
@@ -302,6 +303,47 @@ function App() {
       setSelectedLocalSetupId(null)
     }
   }, [localSetupsQuery.data, selectedLocalSetupId, setSelectedLocalSetupId])
+
+  useEffect(() => {
+    let disposed = false
+    let unlisten: (() => void) | undefined
+
+    void subscribeToGlobalSetupChanges(() => {
+      if (disposed) {
+        return
+      }
+
+      void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey })
+      void queryClient.invalidateQueries({ queryKey: localSetupsQueryKey })
+
+      const current = useAppStore.getState().openDocument
+      if (current?.kind !== 'global' || !current.carFolder || current.dirty) {
+        return
+      }
+
+      const carFolder = current.carFolder
+      void readCarGlobalSetup(carFolder)
+        .then((document) => {
+          const latest = useAppStore.getState().openDocument
+          if (latest?.kind !== 'global' || latest.carFolder !== carFolder || latest.dirty) {
+            return
+          }
+          useAppStore.getState().openDocumentPane(document)
+        })
+        .catch((error) => showError("Couldn't refresh the global setup", error))
+    }).then((fn) => {
+      if (disposed) {
+        fn()
+        return
+      }
+      unlisten = fn
+    })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [queryClient])
 
   const applyMutationResult = (result: MutationResult, successMessage?: string): void => {
     queryClient.setQueryData<AppBootstrap>(bootstrapQueryKey, result.bootstrap)
