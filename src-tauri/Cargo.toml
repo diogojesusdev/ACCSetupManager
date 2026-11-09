@@ -1,10 +1,11 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "ACC Setup Manager"
-authors = ["GitHub Copilot"]
+description = "Windows desktop app for browsing, editing, and organizing Assetto Corsa Competizione setup files"
+authors = ["Diogo Jesus"]
 license = "MIT"
-repository = ""
+repository = "https://github.com/diogojesusdev/ACCSetupManager"
+homepage = "https://diogojesusdev.github.io/ACCSetupManager/"
 edition = "2021"
 rust-version = "1.77.2"
 

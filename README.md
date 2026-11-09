@@ -1,64 +1,65 @@
 # ACC Setup Manager
 
-Windows-first desktop app for browsing, editing, and organizing Assetto Corsa Competizione setup files.
+[![License: MIT](https://img.shields.io/badge/license-MIT-bc3624.svg)](LICENSE)
 
-## What is implemented
+A Windows desktop app for browsing, editing, and organizing **Assetto Corsa Competizione** setup files.
 
-- Tauri 2 + React + TypeScript desktop shell
-- auto-detection of the default ACC setups root
-- manual root override stored in a local SQLite database
-- filesystem scan for cars and tracks with on-demand local setup loading
-- startup backfill of the full ACC track folder set for every existing car folder
-- three-column explorer layout with dedicated local and remote setup workspaces
-- structured setup editor by default with raw JSON fallback, explicit save, and syntax-only validation
-- local create, rename, delete, and import flows
-- session-scoped undo/redo for create, rename, and delete
-- Windows system tray access with reopen and full-exit actions
-- live **Simply Lovely Setups** adapter with preview and download into the selected local track folder
-- SQLite-backed remote list and preview cache with stale fallback behavior
-- built-in deferment notes for the other researched v1 sources
+![ACC Setup Manager showing the car, track, and setup columns](docs/assets/app-overview.png)
 
-## Current remote-source status
+It reads your existing ACC setup folders directly — nothing to import, nothing to convert. Cars and
+tracks are detected automatically, setups load on demand, and the editor writes the same `.json`
+files ACC itself uses.
 
-The first remote adapter is now implemented for **Simply Lovely Setups**, based on the completed verification report in `.agents\remote-source-verification-report.md`.
+## Features
 
-- **Live in app:** Simply Lovely Setups (`list + download + preview`)
-- **Deferred in app:** ACCCarSetups and Parc Ferme, with the report findings surfaced in their tabs
-- **Current backend approach:** the Tauri service discovers the site-bundled public API key at runtime, fetches the verified JSON API directly, caches list/detail payloads in SQLite, and transforms detail payloads into the downloaded `.json` file format
+- Tauri 2 + React desktop shell (Windows-first, with a system tray)
+- Automatic detection of the default ACC setups folder, with a manual override
+- Three-column browser for cars, tracks, and setups, with on-demand loading
+- Structured setup editor with a raw JSON fallback and explicit save
+- Create, rename, delete, import, and duplicate setups
+- Session-scoped undo/redo for create, rename, and delete
+- Remote setup browser with preview and one-click download into the selected track folder
+- SQLite-backed local settings plus a cached remote list, with stale-data fallback
 
-## GitHub Pages
+![ACC Setup Manager showing the remote setups tab with previews and download buttons](docs/assets/app-detail.png)
 
-- Concise project site: `docs\index.html`
-- Deployment workflow: `.github\workflows\deploy-pages.yml`
-- Repository setting to enable once on GitHub: **Pages** -> **Build and deployment** -> **GitHub Actions**
+## Remote setups
 
-## Local development
+The app currently integrates one remote source:
 
-### Prerequisites
+| Source | Status |
+| --- | --- |
+| [Simply Lovely Setups](https://www.simplylovelysetups.com/) | List, preview, and download |
+| ACCCarSetups | Deferred |
+| Parc Ferme | Deferred |
 
+The Simply Lovely adapter reads the site's public, site-bundled API key at runtime, calls the same JSON
+API the website uses, and converts the payload into the `.json` files ACC expects. No credentials are
+shipped with the app.
+
+## Download
+
+Prebuilt installers (`.exe`, `.msi`) are attached to [Releases](../../releases). If there is no release
+yet, build from source with the steps below.
+
+Builds are not code-signed, so Windows SmartScreen may warn the first time you run the installer.
+
+## Requirements
+
+- Windows 10/11
 - Node.js 22+
 - Rust 1.77+
-- Windows
+- [Tauri prerequisites](https://tauri.app/start/prerequisites/) (WebView2, MSVC build tools)
 
-### Install dependencies
-
-```powershell
-npm install
-```
-
-### Run the desktop app
+## Development
 
 ```powershell
-npm run tauri:dev
+npm install          # install dependencies
+npm run tauri:dev    # run the full desktop app
+npm run dev          # frontend only, on http://localhost:1420
 ```
 
-### Frontend-only dev server
-
-```powershell
-npm run dev
-```
-
-## Scripts
+### Scripts
 
 | Script | Purpose |
 | --- | --- |
@@ -70,27 +71,40 @@ npm run dev
 | `npm run e2e` | Run Playwright tests |
 | `cargo check --manifest-path src-tauri\Cargo.toml` | Validate the Rust backend |
 
-## Project structure
+### Project layout
 
 ```text
-src/
+src/                 React frontend
   App.tsx
-  lib/
-  state/
-  test/
+  lib/               setup editor, remote sources, Tauri bridge
+  state/             Zustand store
   types/
-src-tauri/
+src-tauri/           Rust backend
   src/
-    commands.rs
-    error.rs
+    commands.rs      Tauri command surface
     models.rs
-    services/
+    services/        filesystem, remote sources, settings, undo, baselines
     state.rs
+docs/                GitHub Pages site and screenshots
 ```
 
-## Notes
+## How it works
 
-- The app works directly against the ACC setups folder but never applies a setup in-game.
-- Delete operations keep undo support for the current session by staging a restore copy before moving the original file out of the ACC folder.
-- Imported and saved files are validated as JSON syntax only, matching the v1 PRD.
-- Remote Simply Lovely Setups downloads are transformed from the verified detail payload into pretty-printed JSON before being copied into the selected ACC track folder.
+- The app works against the ACC setups folder in place and **never applies a setup in-game**.
+- Files are validated as JSON syntax only, matching the original scope of the project.
+- Deletes stage a restore copy for the current session so undo keeps working; the original file is
+  moved out of the ACC folder, not destroyed immediately.
+- Remote downloads are pretty-printed and written into the selected car/track folder.
+- The only network access is to the remote setup source you open.
+
+## Status
+
+This is a personal project, built for my own use and shared as-is. It is not actively maintained, and
+there is no roadmap or support commitment. Use it at your own risk — but feel free to fork it.
+
+## License
+
+[MIT](LICENSE) © 2026 Diogo Jesus
+
+Not affiliated with Kunos Simulazioni or 505 Games. Assetto Corsa Competizione is a trademark of its
+respective owners.

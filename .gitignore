@@ -16,6 +16,16 @@ test-results
 src-tauri/target
 *.local
 
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Local tooling and agent caches
+.serena/
+.agents/
+.impeccable/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

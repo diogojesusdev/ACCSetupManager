@@ -2,6 +2,17 @@
   "name": "acc-setup-manager",
   "private": true,
   "version": "0.1.0",
+  "description": "Windows desktop app for browsing, editing, and organizing Assetto Corsa Competizione setup files.",
+  "author": "Diogo Jesus",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diogojesusdev/ACCSetupManager.git"
+  },
+  "homepage": "https://diogojesusdev.github.io/ACCSetupManager/",
+  "bugs": {
+    "url": "https://github.com/diogojesusdev/ACCSetupManager/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 1420 --strictPort",
